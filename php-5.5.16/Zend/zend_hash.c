@@ -258,7 +258,16 @@ ZEND_API void zend_hash_set_apply_protection(HashTable *ht, zend_bool bApplyProt
 }
 
 
-
+/**
+* @desc 往ht里面添加/修改key-value，只服务于关联数组，索引数组另有服务函数
+* @param ht         : 哈希表
+* @param arKey      : key 
+* @param nKeyLength : key的长度
+* @param pData      : value
+* @param nDataSize  : value的长度
+* @param pDest      : value为指针时的值
+* @param flag       : 标识新增还是修改  
+*/
 ZEND_API int _zend_hash_add_or_update(HashTable *ht, const char *arKey, uint nKeyLength, void *pData, uint nDataSize, void **pDest, int flag ZEND_FILE_LINE_DC)
 {
 	ulong h;
@@ -270,6 +279,7 @@ ZEND_API int _zend_hash_add_or_update(HashTable *ht, const char *arKey, uint nKe
 
 	IS_CONSISTENT(ht);
 
+	// 异常情况，key长度为0 
 	if (nKeyLength <= 0) {
 #if ZEND_DEBUG
 		ZEND_PUTS("zend_hash_update: Can't put in empty key\n");
@@ -277,13 +287,17 @@ ZEND_API int _zend_hash_add_or_update(HashTable *ht, const char *arKey, uint nKe
 		return FAILURE;
 	}
 
+	// 添加之前，确保hash表空间已经分配过了
 	CHECK_INIT(ht);
 
+	// 计算当前key的hash值
 	h = zend_inline_hash_func(arKey, nKeyLength);
 	nIndex = h & ht->nTableMask;
 
 	p = ht->arBuckets[nIndex];
 	while (p != NULL) {
+		// hash表中有该节点
+		// 这地方分了两种情形（为什么分两种情况呢？？？？）
 		if (p->arKey == arKey ||
 			((p->h == h) && (p->nKeyLength == nKeyLength) && !memcmp(p->arKey, arKey, nKeyLength))) {
 				if (flag & HASH_ADD) {
@@ -297,9 +311,11 @@ ZEND_API int _zend_hash_add_or_update(HashTable *ht, const char *arKey, uint nKe
 					return FAILURE;
 				}
 #endif
+				// 更新value的时候先将原先的指针内存释放
 				if (ht->pDestructor) {
 					ht->pDestructor(p->pData);
 				}
+				// UPDATE_DATA不负责释放内存
 				UPDATE_DATA(ht, p, pData, nDataSize);
 				if (pDest) {
 					*pDest = p->pData;
@@ -310,7 +326,14 @@ ZEND_API int _zend_hash_add_or_update(HashTable *ht, const char *arKey, uint nKe
 		p = p->pNext;
 	}
 	
+	// 执行到这里，操作只能是增加一个节点了
+	// 如果arKey是字符串(???)
+	// Zend/zend_string.h +37
+	// #define IS_INTERNED(s) \
+    //    (((s) >= CG(interned_strings_start)) && ((s) < CG(interned_strings_end)))
 	if (IS_INTERNED(arKey)) {
+		// 这里没有分配多余的空间
+		// 也就是value是一个指针
 		p = (Bucket *) pemalloc(sizeof(Bucket), ht->persistent);
 		if (!p) {
 			return FAILURE;
@@ -321,22 +344,30 @@ ZEND_API int _zend_hash_add_or_update(HashTable *ht, const char *arKey, uint nKe
 		if (!p) {
 			return FAILURE;
 		}
+		// 注意这里的 p + 1 是跨过整个Bucket结构体空间
+		// 结构体重的arKey存放的是他之后一个字节的地址
+		// 而多分配的nKeyLength 存放的是value值
 		p->arKey = (const char*)(p + 1);
 		memcpy((char*)p->arKey, arKey, nKeyLength);
 	}
 	p->nKeyLength = nKeyLength;
 	INIT_DATA(ht, p, pData, nDataSize);
 	p->h = h;
+
+	// 链入本桶内的双向链表中
 	CONNECT_TO_BUCKET_DLLIST(p, ht->arBuckets[nIndex]);
 	if (pDest) {
 		*pDest = p->pData;
 	}
 
 	HANDLE_BLOCK_INTERRUPTIONS();
+
+	// 链入全局双向链表中
 	CONNECT_TO_GLOBAL_DLLIST(p, ht);
 	ht->arBuckets[nIndex] = p;
 	HANDLE_UNBLOCK_INTERRUPTIONS();
 
+	// 没插入完成一个 判断是否需要扩容
 	ht->nNumOfElements++;
 	ZEND_HASH_IF_FULL_DO_RESIZE(ht);		/* If the Hash table is full, resize it */
 	return SUCCESS;
@@ -430,7 +461,15 @@ ZEND_API int zend_hash_add_empty_element(HashTable *ht, const char *arKey, uint 
 	return zend_hash_add(ht, arKey, nKeyLength, &dummy, sizeof(void *), NULL);
 }
 
-
+/**
+* @desc 数字索引类型的key-value值添加
+* @param ht        : 添加的hash表结构
+* @param  h        : key 新增时 h 设置为0 更新时会透传上层的h
+* @param pData     : value
+* @param nDataSize ：value的长度
+* @param pDest     : 用于指向下一个元素
+* @param flag      : HASH_NEXT_INSERT or HASH_ADD    
+*/
 ZEND_API int _zend_hash_index_update_or_next_insert(HashTable *ht, ulong h, void *pData, uint nDataSize, void **pDest, int flag ZEND_FILE_LINE_DC)
 {
 	uint nIndex;
@@ -442,6 +481,10 @@ ZEND_API int _zend_hash_index_update_or_next_insert(HashTable *ht, ulong h, void
 	IS_CONSISTENT(ht);
 	CHECK_INIT(ht);
 
+	// 如果是HASH_ADD，h为当前保留的最大下标
+	// 如果是HASH_NEXT_INSERT, 两种情况 
+	// 1、更新已有值，此时(h < nNextFreeElement)，定位到对应的元素，修改即可
+	// 2、插入一个key-value对，此时 (h >= nNextFreeElement), 那么参考L515行注释
 	if (flag & HASH_NEXT_INSERT) {
 		h = ht->nNextFreeElement;
 	}
@@ -450,6 +493,7 @@ ZEND_API int _zend_hash_index_update_or_next_insert(HashTable *ht, ulong h, void
 	p = ht->arBuckets[nIndex];
 	while (p != NULL) {
 		if ((p->nKeyLength == 0) && (p->h == h)) {
+			// 找到了要添加的value了，并且flag设置为添加（添加到XX之后或者直接添加）
 			if (flag & HASH_NEXT_INSERT || flag & HASH_ADD) {
 				return FAILURE;
 			}
@@ -466,6 +510,10 @@ ZEND_API int _zend_hash_index_update_or_next_insert(HashTable *ht, ulong h, void
 			}
 			UPDATE_DATA(ht, p, pData, nDataSize);
 			HANDLE_UNBLOCK_INTERRUPTIONS();
+			// 当插入一个key-value对且key>nNextFreeElement时，及时修正nNextFreeElement值
+			// 以保证下一个元素的下标是当前下标+1
+			// 这个地方挺有意思的，例如当前已用下标情况是 0, 1, 2, 3, 9
+			// 那么插入一个下标为8的元素，不更新nNextFreeElement 
 			if ((long)h >= (long)ht->nNextFreeElement) {
 				ht->nNextFreeElement = h < LONG_MAX ? h + 1 : LONG_MAX;
 			}
@@ -682,43 +730,57 @@ static Bucket *zend_hash_apply_deleter(HashTable *ht, Bucket *p)
 #endif
 
 	HANDLE_BLOCK_INTERRUPTIONS();
+
+	// 调整该节点的左侧指向指针
 	if (p->pLast) {
 		p->pLast->pNext = p->pNext;
 	} else {
+		// 这里表名左侧是没有节点的，那么将头指针指向下一个节点即可
 		uint nIndex;
 
 		nIndex = p->h & ht->nTableMask;
 		ht->arBuckets[nIndex] = p->pNext;
 	}
+
+	// 调整该节点的右侧指针
 	if (p->pNext) {
 		p->pNext->pLast = p->pLast;
 	} else {
 		/* Nothing to do as this list doesn't have a tail */
 	}
 
+	// 指向上一个桶链表的指针
+	// 每一个节点都会这么设置 (???)
 	if (p->pListLast != NULL) {
 		p->pListLast->pListNext = p->pListNext;
 	} else { 
 		/* Deleting the head of the list */
 		ht->pListHead = p->pListNext;
 	}
+	// 指向下一个桶链表的指针
 	if (p->pListNext != NULL) {
 		p->pListNext->pListLast = p->pListLast;
 	} else {
 		ht->pListTail = p->pListLast;
 	}
+
+	// 内部遍历的指针如果是当前指针，下移一个节点
 	if (ht->pInternalPointer == p) {
 		ht->pInternalPointer = p->pListNext;
 	}
+
+	// 节点个数减一
 	ht->nNumOfElements--;
 	HANDLE_UNBLOCK_INTERRUPTIONS();
 
+	// 释放空间
 	if (ht->pDestructor) {
 		ht->pDestructor(p->pData);
 	}
 	if (p->pData != &p->pDataPtr) {
 		pefree(p->pData, ht->persistent);
 	}
+
 	retval = p->pListNext;
 	pefree(p, ht->persistent);
 
