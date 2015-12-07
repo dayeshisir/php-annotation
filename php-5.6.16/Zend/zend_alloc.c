@@ -662,6 +662,12 @@ static void *_zend_mm_alloc_int(zend_mm_heap *heap, size_t size ZEND_FILE_LINE_D
 static void _zend_mm_free_int(zend_mm_heap *heap, void *p ZEND_FILE_LINE_DC ZEND_FILE_LINE_ORIG_DC);
 static void *_zend_mm_realloc_int(zend_mm_heap *heap, void *p, size_t size ZEND_FILE_LINE_DC ZEND_FILE_LINE_ORIG_DC) ZEND_ATTRIBUTE_ALLOC_SIZE(3);
 
+/**
+ * @desc 计算给定的数字以二进制编码最高为的1是第几位
+ *       例如 15 （0000 1111） 返回 3
+ *           8 （0000 1000） 返回3
+ * @param : size : 待分配的内存大小
+ */
 static inline unsigned int zend_mm_high_bit(size_t _size)
 {
 #if defined(__GNUC__) && (defined(__native_client__) || defined(i386))
@@ -690,6 +696,13 @@ static inline unsigned int zend_mm_high_bit(size_t _size)
 #endif
 }
 
+/**
+ * @desc  给定一个数字，计算最低位的1位于第几位
+ *        例如  1 （0000 0001）的 二级制编码中1的位数是0
+ *           2 （0000 0010）的二级制编码中1的位数是1
+ *           3 （0000 0011）的二禁止编码中1的位数是0
+ * @param size : 待分配的内存大小
+*/
 static inline unsigned int zend_mm_low_bit(size_t _size)
 {
 #if defined(__GNUC__) && (defined(__native_client__) || defined(i386))
@@ -724,25 +737,35 @@ static inline unsigned int zend_mm_low_bit(size_t _size)
 #endif
 }
 
+/**
+ * @desc 加一块空内存块到空闲队列列表中
+ * @param : mm_block : 待添加的内存块
+ * @param : heap     : 添加到的heap
+ */
 static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_block *mm_block)
 {
 	size_t size;
 	size_t index;
 
+	// 将mm_block的magic字段设置为MEM_BLOCK_FREED
 	ZEND_MM_SET_MAGIC(mm_block, MEM_BLOCK_FREED);
 
+	// 获取mm_block的大小
 	size = ZEND_MM_FREE_BLOCK_SIZE(mm_block);
 	if (EXPECTED(!ZEND_MM_SMALL_SIZE(size))) {
 		zend_mm_free_block **p;
 
+		// 根据mm_block的大小查找在large_bucket中的下标
+		// 注：这里的hash函数相为按照size的1的最高位索引 例如 8的hash函数返回值为3,15的hash函数返回值为3
 		index = ZEND_MM_LARGE_BUCKET_INDEX(size);
-		p = &heap->large_free_buckets[index];
-		mm_block->child[0] = mm_block->child[1] = NULL;
+		p = &heap->large_free_buckets[index];              // p为large_buckets的根
+		mm_block->child[0] = mm_block->child[1] = NULL;    // mm_block的子节点均设置为Null
 		if (!*p) {
-			*p = mm_block;
-			mm_block->parent = p;
-			mm_block->prev_free_block = mm_block->next_free_block = mm_block;
-			heap->large_free_bitmap |= (ZEND_MM_LONG_CONST(1) << index);
+			// 该分支处理的是该桶是空时的情景
+			*p = mm_block;                // 根节点指向当前节点
+			mm_block->parent = p;         // 父节点设置为null
+			mm_block->prev_free_block = mm_block->next_free_block = mm_block;     // 双向列表的前驱、后继均指向自己
+			heap->large_free_bitmap |= (ZEND_MM_LONG_CONST(1) << index);          // 标识字段中该索引位置设置为1，以表示有这大小的空间
 		} else {
 			size_t m;
 
@@ -758,8 +781,10 @@ static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_blo
 						break;
 					}
 				} else {
+					// 这里，定位到了size大小的内存块所在的桶
 					zend_mm_free_block *next = prev->next_free_block;
 
+					// 调增要插入位置的左右节点的右左指针指向
 					prev->next_free_block = next->prev_free_block = mm_block;
 					mm_block->next_free_block = next;
 					mm_block->prev_free_block = prev;
@@ -769,10 +794,13 @@ static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_blo
 			}
 		}
 	} else {
+		// 这里是小内存块分配的分支
 		zend_mm_free_block *prev, *next;
 
+		// 计算hash值
 		index = ZEND_MM_BUCKET_INDEX(size);
 
+		// 该桶是空的，置对应的标识位为1
 		prev = ZEND_MM_SMALL_FREE_BUCKET(heap, index);
 		if (prev->prev_free_block == prev) {
 			heap->free_bitmap |= (ZEND_MM_LONG_CONST(1) << index);
@@ -785,13 +813,20 @@ static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_blo
 	}
 }
 
+/**
+ * @desc 从heap的空闲队列中移除一个内存块
+ * @param : heap     : 堆
+ * @param : mm_block : 要移除的内存块
+ */
 static inline void zend_mm_remove_from_free_list(zend_mm_heap *heap, zend_mm_free_block *mm_block)
 {
 	zend_mm_free_block *prev = mm_block->prev_free_block;
 	zend_mm_free_block *next = mm_block->next_free_block;
 
+	// 确保要移除的内存块的magic字段是MEM_BLOCK_FREED
 	ZEND_MM_CHECK_MAGIC(mm_block, MEM_BLOCK_FREED);
 
+	// 当前节点没有兄弟节点，独生子啊
 	if (EXPECTED(prev == mm_block)) {
 		zend_mm_free_block **rp, **cp;
 
@@ -800,10 +835,11 @@ static inline void zend_mm_remove_from_free_list(zend_mm_heap *heap, zend_mm_fre
 			zend_mm_panic("zend_mm_heap corrupted");
 		}
 #endif
-
+		//  这个地方等价于rp=mm_block->child[0]; 为何这么搞一下呢？？？
 		rp = &mm_block->child[mm_block->child[1] != NULL];
 		prev = *rp;
 		if (EXPECTED(prev == NULL)) {
+			// 左孩子为空？
 			size_t index = ZEND_MM_LARGE_BUCKET_INDEX(ZEND_MM_FREE_BLOCK_SIZE(mm_block));
 
 			ZEND_MM_CHECK_TREE(mm_block);
@@ -862,9 +898,11 @@ static inline void zend_mm_add_to_rest_list(zend_mm_heap *heap, zend_mm_free_blo
 {
 	zend_mm_free_block *prev, *next;
 
+	// 感情需要先将rest中比较大的分离出去，放置到large_buckets中
 	while (heap->rest_count >= ZEND_MM_MAX_REST_BLOCKS) {
 		zend_mm_free_block *p = heap->rest_buckets[1];
 
+		// 不是小块内存，那么就是大块的咯
 		if (!ZEND_MM_SMALL_SIZE(ZEND_MM_FREE_BLOCK_SIZE(p))) {
 			heap->rest_count--;
 		}

@@ -724,25 +724,35 @@ static inline unsigned int zend_mm_low_bit(size_t _size)
 #endif
 }
 
+/**
+ * @desc 加一块空内存块到空闲队列列表中
+ * @param : mm_block : 待添加的内存块
+ * @param : heap     : 添加到的heap
+ */
 static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_block *mm_block)
 {
 	size_t size;
 	size_t index;
 
+	// 将mm_block的magic字段设置为MEM_BLOCK_FREED
 	ZEND_MM_SET_MAGIC(mm_block, MEM_BLOCK_FREED);
 
+	// 获取mm_block的大小
 	size = ZEND_MM_FREE_BLOCK_SIZE(mm_block);
 	if (EXPECTED(!ZEND_MM_SMALL_SIZE(size))) {
 		zend_mm_free_block **p;
 
+		// 根据mm_block的大小查找在large_bucket中的下标
+		// 注：这里的hash函数相为按照size的1的最高位索引 例如 8的hash函数返回值为3,15的hash函数返回值为3
 		index = ZEND_MM_LARGE_BUCKET_INDEX(size);
-		p = &heap->large_free_buckets[index];
-		mm_block->child[0] = mm_block->child[1] = NULL;
+		p = &heap->large_free_buckets[index];    // p为large_buckets的根
+		mm_block->child[0] = mm_block->child[1] = NULL;   // mm_block的子节点均设置为Null
 		if (!*p) {
-			*p = mm_block;
-			mm_block->parent = p;
-			mm_block->prev_free_block = mm_block->next_free_block = mm_block;
-			heap->large_free_bitmap |= (ZEND_MM_LONG_CONST(1) << index);
+			// 该分支处理的是该桶是空时的情景
+			*p = mm_block;                       // 根节点指向当前节点
+			mm_block->parent = p;                // 父节点设置为null
+			mm_block->prev_free_block = mm_block->next_free_block = mm_block;   // 双向列表的前驱、后继均指向自己
+			heap->large_free_bitmap |= (ZEND_MM_LONG_CONST(1) << index);        // 标识字段中该索引位置设置为1，以表示有这大小的空间
 		} else {
 			size_t m;
 
@@ -758,8 +768,10 @@ static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_blo
 						break;
 					}
 				} else {
+					// 这里，定位到了size大小的内存块所在的桶
 					zend_mm_free_block *next = prev->next_free_block;
 
+					// 调增要插入位置的左右节点的右左指针指向
 					prev->next_free_block = next->prev_free_block = mm_block;
 					mm_block->next_free_block = next;
 					mm_block->prev_free_block = prev;
@@ -769,11 +781,15 @@ static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_blo
 			}
 		}
 	} else {
+		// 这里是小内存块分配的分支
 		zend_mm_free_block *prev, *next;
 
+		// 计算hash值
 		index = ZEND_MM_BUCKET_INDEX(size);
 
 		prev = ZEND_MM_SMALL_FREE_BUCKET(heap, index);
+
+		// 该桶是空的，置对应的标识位为1
 		if (prev->prev_free_block == prev) {
 			heap->free_bitmap |= (ZEND_MM_LONG_CONST(1) << index);
 		}
@@ -785,6 +801,11 @@ static inline void zend_mm_add_to_free_list(zend_mm_heap *heap, zend_mm_free_blo
 	}
 }
 
+/**
+ * @desc 从空闲队列中移除一个内存块
+ * @param : heap     : 内存管理堆
+ * @param : mm_block : 期望移除的内存块
+ */
 static inline void zend_mm_remove_from_free_list(zend_mm_heap *heap, zend_mm_free_block *mm_block)
 {
 	zend_mm_free_block *prev = mm_block->prev_free_block;
