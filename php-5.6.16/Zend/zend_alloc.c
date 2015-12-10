@@ -337,8 +337,8 @@ typedef struct _zend_mm_block_info {
 #if ZEND_MM_COOKIES
 	size_t _cookie;
 #endif
-	size_t _size;
-	size_t _prev;
+	size_t _size;           // block的大小
+	size_t _prev;           // 计算前一个块有用到
 } zend_mm_block_info;
 
 #if ZEND_DEBUG
@@ -376,6 +376,7 @@ typedef struct _zend_mm_block {
 #endif
 } zend_mm_block;
 
+// 小的空闲块  双向链表结构
 typedef struct _zend_mm_small_free_block {
 	zend_mm_block_info info;
 #if ZEND_DEBUG
@@ -384,10 +385,11 @@ typedef struct _zend_mm_small_free_block {
 	THREAD_T thread_id;
 # endif
 #endif
-	struct _zend_mm_free_block *prev_free_block;
-	struct _zend_mm_free_block *next_free_block;
+	struct _zend_mm_free_block *prev_free_block;      // 前一个块
+	struct _zend_mm_free_block *next_free_block;      // 后一个块
 } zend_mm_small_free_block;
 
+// 双向链表 + 树结构
 typedef struct _zend_mm_free_block {
 	zend_mm_block_info info;
 #if ZEND_DEBUG
@@ -396,11 +398,11 @@ typedef struct _zend_mm_free_block {
 	THREAD_T thread_id;
 # endif
 #endif
-	struct _zend_mm_free_block *prev_free_block;
-	struct _zend_mm_free_block *next_free_block;
+	struct _zend_mm_free_block *prev_free_block;    // 前一个块
+	struct _zend_mm_free_block *next_free_block;    // 后一个块
 
-	struct _zend_mm_free_block **parent;
-	struct _zend_mm_free_block *child[2];
+	struct _zend_mm_free_block **parent;            // 父结点
+	struct _zend_mm_free_block *child[2];           // 两个子结点
 } zend_mm_free_block;
 
 #define ZEND_MM_NUM_BUCKETS (sizeof(size_t) << 3)
@@ -413,32 +415,32 @@ typedef struct _zend_mm_free_block {
 #endif
 
 struct _zend_mm_heap {
-	int                 use_zend_alloc;
-	void               *(*_malloc)(size_t);
-	void                (*_free)(void*);
-	void               *(*_realloc)(void*, size_t);
-	size_t              free_bitmap;
-	size_t              large_free_bitmap;
-	size_t              block_size;
-	size_t              compact_size;
-	zend_mm_segment    *segments_list;
-	zend_mm_storage    *storage;
-	size_t              real_size;
-	size_t              real_peak;
-	size_t              limit;
-	size_t              size;
-	size_t              peak;
-	size_t              reserve_size;
-	void               *reserve;
-	int                 overflow;
+	int                 use_zend_alloc;                // 是否使用zend内存管理器
+	void               *(*_malloc)(size_t);            // 内存分配函数
+	void                (*_free)(void*);               // 内存释放函数
+	void               *(*_realloc)(void*, size_t);    // 内存重新分配函数
+	size_t              free_bitmap;                   // 小块空闲内存标识
+	size_t              large_free_bitmap;             // 大块空闲内存标识
+	size_t              block_size;                    // 一次内存分配的段大小，即ZEND_MM_SEG_SIZE指定的大小，默认为ZEND_MM_SEG_SIZE   (256 * 1024)
+	size_t              compact_size;                  // 压缩操作边界值，为ZEND_MM_COMPACT指定大小，默认为 2 * 1024 * 1024
+	zend_mm_segment    *segments_list;                 // 段指针列表
+	zend_mm_storage    *storage;                       // 所调用的存储层
+	size_t              real_size;                     // 堆的真实大小
+	size_t              real_peak;                     // 堆真实大小的峰值
+	size_t              limit;                         // 堆的内存边界
+	size_t              size;                          // 堆大小
+	size_t              peak;                          // 堆大小的峰值
+	size_t              reserve_size;                  // 备用堆大小
+	void               *reserve;                       // 备用堆
+	int                 overflow;                      // 内存溢出数
 	int                 internal;
 #if ZEND_MM_CACHE
-	unsigned int        cached;
-	zend_mm_free_block *cache[ZEND_MM_NUM_BUCKETS];
+	unsigned int        cached;                        // 已缓存大小
+	zend_mm_free_block *cache[ZEND_MM_NUM_BUCKETS];    // 缓存数组
 #endif
-	zend_mm_free_block *free_buckets[ZEND_MM_NUM_BUCKETS*2];
-	zend_mm_free_block *large_free_buckets[ZEND_MM_NUM_BUCKETS];
-	zend_mm_free_block *rest_buckets[2];
+	zend_mm_free_block *free_buckets[ZEND_MM_NUM_BUCKETS*2];       // 小块内存数组，相当索引的角色
+	zend_mm_free_block *large_free_buckets[ZEND_MM_NUM_BUCKETS];   // 大块内存数组，相当索引的角色
+	zend_mm_free_block *rest_buckets[2];                           // 剩余内存数组
 	int                 rest_count;
 #if ZEND_MM_CACHE_STAT
 	struct {
