@@ -33,6 +33,7 @@
 #include "fpm_systemd.h"
 #endif
 
+// 算出now+frequency的sum,存到timeout中
 #define fpm_event_set_timeout(ev, now) timeradd(&(now), &(ev)->frequency, &(ev)->timeout);
 
 static void fpm_event_cleanup(int which, void *arg);
@@ -42,7 +43,10 @@ static int fpm_event_queue_add(struct fpm_event_queue_s **queue, struct fpm_even
 static int fpm_event_queue_del(struct fpm_event_queue_s **queue, struct fpm_event_s *ev);
 static void fpm_event_queue_destroy(struct fpm_event_queue_s **queue);
 
+// 事件模块
 static struct fpm_event_module_s *module;
+
+// 两个事件队列
 static struct fpm_event_queue_s *fpm_event_queue_timer = NULL;
 static struct fpm_event_queue_s *fpm_event_queue_fd = NULL;
 
@@ -53,6 +57,7 @@ static void fpm_event_cleanup(int which, void *arg) /* {{{ */
 }
 /* }}} */
 
+// 接收到信号的对应回调函数
 static void fpm_got_signal(struct fpm_event_s *ev, short which, void *arg) /* {{{ */
 {
 	char c;
@@ -123,6 +128,7 @@ static void fpm_got_signal(struct fpm_event_s *ev, short which, void *arg) /* {{
 }
 /* }}} */
 
+// 遍历单链表，查找传入的事件是否在队列中
 static struct fpm_event_s *fpm_event_queue_isset(struct fpm_event_queue_s *queue, struct fpm_event_s *ev) /* {{{ */
 {
 	if (!ev) {
@@ -140,6 +146,7 @@ static struct fpm_event_s *fpm_event_queue_isset(struct fpm_event_queue_s *queue
 }
 /* }}} */
 
+// 添加事件到事件队列
 static int fpm_event_queue_add(struct fpm_event_queue_s **queue, struct fpm_event_s *ev) /* {{{ */
 {
 	struct fpm_event_queue_s *elt;
@@ -152,6 +159,7 @@ static int fpm_event_queue_add(struct fpm_event_queue_s **queue, struct fpm_even
 		return 0;
 	}
 
+	// 不存在，分配内存
 	if (!(elt = malloc(sizeof(struct fpm_event_queue_s)))) {
 		zlog(ZLOG_SYSERROR, "Unable to add the event to queue: malloc() failed");
 		return -1;
@@ -160,6 +168,7 @@ static int fpm_event_queue_add(struct fpm_event_queue_s **queue, struct fpm_even
 	elt->next = NULL;
 	elt->ev = ev;
 
+	// 这个也是头插法
 	if (*queue) {
 		(*queue)->prev = elt;
 		elt->next = *queue;
@@ -167,6 +176,7 @@ static int fpm_event_queue_add(struct fpm_event_queue_s **queue, struct fpm_even
 	*queue = elt;
 
 	/* ask the event module to add the fd from its own queue */
+	// TODO
 	if (*queue == fpm_event_queue_fd && module->add) {
 		module->add(ev);
 	}
@@ -175,6 +185,7 @@ static int fpm_event_queue_add(struct fpm_event_queue_s **queue, struct fpm_even
 }
 /* }}} */
 
+// 事件队列中删除
 static int fpm_event_queue_del(struct fpm_event_queue_s **queue, struct fpm_event_s *ev) /* {{{ */
 {
 	struct fpm_event_queue_s *q;
@@ -234,6 +245,9 @@ static void fpm_event_queue_destroy(struct fpm_event_queue_s **queue) /* {{{ */
 }
 /* }}} */
 
+/* 初始化时间模块module
+ * 其实就是根据不同的事件模型初始化add,remove,clean那几个函数指针
+ */
 int fpm_event_pre_init(char *machanism) /* {{{ */
 {
 	/* kqueue */
@@ -343,19 +357,24 @@ int fpm_event_init_main() /* {{{ */
 }
 /* }}} */
 
+// fpm主进程的事件循环
 void fpm_event_loop(int err) /* {{{ */
 {
+	// 信号结构体
 	static struct fpm_event_s signal_fd_event;
 
 	/* sanity check */
+	// 查看当前进程是不是父进程
 	if (fpm_globals.parent_pid != getpid()) {
 		return;
 	}
 
+	// 设置对应的处理回调函数
 	fpm_event_set(&signal_fd_event, fpm_signals_get_fd(), FPM_EV_READ, &fpm_got_signal, NULL);
 	fpm_event_add(&signal_fd_event, 0);
 
 	/* add timers */
+	// 添加心跳定时器事件
 	if (fpm_globals.heartbeat > 0) {
 		fpm_pctl_heartbeat(NULL, 0, NULL);
 	}
@@ -388,8 +407,11 @@ void fpm_event_loop(int err) /* {{{ */
 		timerclear(&ms);
 
 		/* search in the timeout queue for the next timer to trigger */
+		// 找到最小的timeout
 		q = fpm_event_queue_timer;
+		int time_queue_len = 0;
 		while (q) {
+			//zlog(ZLOG_NOTICE, "pa -> find the proper timeout to set, time_queue_len[%d]", ++time_queue_len);
 			if (!timerisset(&ms)) {
 				ms = q->ev->timeout;
 			} else {
@@ -402,12 +424,16 @@ void fpm_event_loop(int err) /* {{{ */
 
 		/* 1s timeout if none has been set */
 		if (!timerisset(&ms) || timercmp(&ms, &now, <) || timercmp(&ms, &now, ==)) {
+			// 如果ms小于当前时间,则设置为1000ms
 			timeout = 1000;
 		} else {
+			// 否则计算差值
 			timersub(&ms, &now, &tmp);
 			timeout = (tmp.tv_sec * 1000) + (tmp.tv_usec / 1000) + 1;
 		}
 
+		// 调用相应的io复用模型的wait,阻塞timeout时长
+		//zlog(ZLOG_NOTICE, "pa -> func : fpm_event_loop, triggered %d events, timeout[%d]", ret, timeout);
 		ret = module->wait(fpm_event_queue_fd, timeout);
 
 		/* is a child, nothing to do here */
@@ -415,24 +441,28 @@ void fpm_event_loop(int err) /* {{{ */
 			return;
 		}
 
-		if (ret > 0) {
-			zlog(ZLOG_DEBUG, "event module triggered %d events", ret);
-		}
-
+		// 此处是有事件返回,或者是到达timeout时间
+		
 		/* trigger timers */
 		q = fpm_event_queue_timer;
+		time_queue_len = 0;
 		while (q) {
+			//zlog(ZLOG_NOTICE, "pa -> trigger timers, time_queue_len[%d]", ++time_queue_len);
 			fpm_clock_get(&now);
 			if (q->ev) {
 				if (timercmp(&now, &q->ev->timeout, >) || timercmp(&now, &q->ev->timeout, ==)) {
+					// 如果当前时间大于等于ev的timeout,则fire事件
 					fpm_event_fire(q->ev);
 					/* sanity check */
 					if (fpm_globals.parent_pid != getpid()) {
 						return;
 					}
 					if (q->ev->flags & FPM_EV_PERSIST) {
+						// 如果是FPM_EV_PERSIST模式,则再添加timeout事件进队列
 						fpm_event_set_timeout(q->ev, now);
 					} else { /* delete the event */
+						// 否则删除事件
+						zlog(ZLOG_NOTICE, "pa -> delete event!");
 						q2 = q;
 						if (q->prev) {
 							q->prev->next = q->next;
@@ -454,10 +484,19 @@ void fpm_event_loop(int err) /* {{{ */
 			}
 			q = q->next;
 		}
+		
+		time_queue_len = 0;
+		q = fpm_event_queue_timer;
+		while(q) {
+			time_queue_len++;
+			q = q->next;
+		}
+		//zlog(ZLOG_NOTICE, "pa -> current fpm_event_queue_timer at last len[%d]", time_queue_len);
 	}
 }
 /* }}} */
 
+// 触发事件的回调函数
 void fpm_event_fire(struct fpm_event_s *ev) /* {{{ */
 {
 	if (!ev || !ev->callback) {
@@ -468,6 +507,8 @@ void fpm_event_fire(struct fpm_event_s *ev) /* {{{ */
 }
 /* }}} */
 
+// 设置事件结构体ev的各项参数，很类似初始化
+// input : 事件结构体指针,fd,标志位，回调函数，参数
 int fpm_event_set(struct fpm_event_s *ev, int fd, int flags, void (*callback)(struct fpm_event_s *, short, void *), void *arg) /* {{{ */
 {
 	if (!ev || !callback || fd < -1) {
@@ -482,6 +523,8 @@ int fpm_event_set(struct fpm_event_s *ev, int fd, int flags, void (*callback)(st
 }
 /* }}} */
 
+// 添加到事件队列
+// 事件结构体，频率
 int fpm_event_add(struct fpm_event_s *ev, unsigned long int frequency) /* {{{ */
 {
 	struct timeval now;
@@ -494,6 +537,7 @@ int fpm_event_add(struct fpm_event_s *ev, unsigned long int frequency) /* {{{ */
 	ev->index = -1;
 
 	/* it's a triggered event on incoming data */
+	// 处理io事件,添加到事件队列里
 	if (ev->flags & FPM_EV_READ) {
 		ev->which = FPM_EV_READ;
 		if (fpm_event_queue_add(&fpm_event_queue_fd, ev) != 0) {
@@ -503,8 +547,9 @@ int fpm_event_add(struct fpm_event_s *ev, unsigned long int frequency) /* {{{ */
 	}
 
 	/* it's a timer event */
+	// 处理定时器事件
 	ev->which = FPM_EV_TIMEOUT;
-
+	
 	fpm_clock_get(&now);
 	if (frequency >= 1000) {
 		tmp.tv_sec = frequency / 1000;
@@ -515,7 +560,7 @@ int fpm_event_add(struct fpm_event_s *ev, unsigned long int frequency) /* {{{ */
 	}
 	ev->frequency = tmp;
 	fpm_event_set_timeout(ev, now);
-
+	
 	if (fpm_event_queue_add(&fpm_event_queue_timer, ev) != 0) {
 		return -1;
 	}

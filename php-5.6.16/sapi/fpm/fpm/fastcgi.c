@@ -33,6 +33,10 @@
 #include "fpm_request.h"
 #include "zlog.h"
 
+// windows头文件
+/*
+只有windows的socket需要加锁
+*/
 #ifdef _WIN32
 
 #include <windows.h>
@@ -138,6 +142,7 @@ typedef union _sa_t {
 	struct sockaddr_in6 sa_inet6;
 } sa_t;
 
+// fastcgi相关变量
 static HashTable fcgi_mgmt_vars;
 
 static int is_initialized = 0;
@@ -165,10 +170,12 @@ static void fcgi_signal_handler(int signo)
 	}
 }
 
+// 设置进程所需要监听的信号
 static void fcgi_setup_signals(void)
 {
 	struct sigaction new_sa, old_sa;
 
+	// 将信号集合设置为空
 	sigemptyset(&new_sa.sa_mask);
 	new_sa.sa_flags = 0;
 	new_sa.sa_handler = fcgi_signal_handler;
@@ -181,13 +188,24 @@ static void fcgi_setup_signals(void)
 }
 #endif
 
+// 初始化
+/*
+1.初始化fcgi_mgmt_vars相应的字段,主要是fastcgi协议要求的内容,fcgi_mgmt_vars是一个hashtable
+2.标记is_initialized=1
+3.fcgi_setup_signal初始化信号
+*/
 int fcgi_init(void)
 {
+	// 初始化
 	if (!is_initialized) {
 		zend_hash_init(&fcgi_mgmt_vars, 0, NULL, fcgi_free_mgmt_var_cb, 1);
+		
+		// FCGI_MPXS_CONNS是fastcgi协议中规定的字段
 		fcgi_set_mgmt_var("FCGI_MPXS_CONNS", sizeof("FCGI_MPXS_CONNS") - 1, "0", sizeof("0")-1);
 
 		is_initialized = 1;
+		
+		// win相关
 #ifdef _WIN32
 # if 0
 		/* TODO: Support for TCP sockets */
@@ -232,6 +250,7 @@ void fcgi_set_in_shutdown(int new_value)
 	in_shutdown = new_value;
 }
 
+// 资源回收
 void fcgi_shutdown(void)
 {
 	if (is_initialized) {
@@ -242,6 +261,7 @@ void fcgi_shutdown(void)
 	}
 }
 
+// 类似ip防火墙
 void fcgi_set_allowed_clients(char *ip)
 {
 	char *cur, *end;
@@ -285,8 +305,10 @@ void fcgi_set_allowed_clients(char *ip)
 	}
 }
 
+// 初始化每个worker的request字段
 void fcgi_init_request(fcgi_request *req, int listen_socket)
 {
+	zlog(ZLOG_NOTICE, "pa -> fcgi_init_request");
 	memset(req, 0, sizeof(fcgi_request));
 	req->listen_socket = listen_socket;
 	req->fd = -1;
@@ -303,6 +325,7 @@ void fcgi_init_request(fcgi_request *req, int listen_socket)
 #endif
 }
 
+// 写socket的函数
 static inline ssize_t safe_write(fcgi_request *req, const void *buf, size_t count)
 {
 	int    ret;
@@ -321,6 +344,8 @@ static inline ssize_t safe_write(fcgi_request *req, const void *buf, size_t coun
 		}
 #else
 		ret = write(req->fd, ((char*)buf)+n, count-n);
+		// patodo : 为什么buf的内容打不出来?
+		zlog(ZLOG_NOTICE, "pa -> func safe_write : bufsize[%d], buf[%s], current_offset[%d], succ_buf_write[%d]", count, buf, n, ret);
 #endif
 		if (ret > 0) {
 			n += ret;
@@ -331,6 +356,7 @@ static inline ssize_t safe_write(fcgi_request *req, const void *buf, size_t coun
 	return n;
 }
 
+// 读fd
 static inline ssize_t safe_read(fcgi_request *req, const void *buf, size_t count)
 {
 	int    ret;
@@ -358,9 +384,13 @@ static inline ssize_t safe_read(fcgi_request *req, const void *buf, size_t count
 			return ret;
 		}
 	} while (n != count);
+	if(2 < strlen(buf)) {
+		zlog(ZLOG_NOTICE, "pa -> func safe_read length[%d], buf : %s\n", strlen(buf), buf);
+	}
 	return n;
 }
 
+// 设置fastcgi协议的header
 static inline int fcgi_make_header(fcgi_header *hdr, fcgi_request_type type, int req_id, int len)
 {
 	int pad = ((len + 7) & ~7) - len;
@@ -506,6 +536,7 @@ static void fcgi_free_var(char **s)
 
 static int fcgi_read_request(fcgi_request *req)
 {
+	
 	fcgi_header hdr;
 	int len, padding;
 	unsigned char buf[FCGI_MAX_LENGTH+8];
@@ -667,6 +698,7 @@ static int fcgi_read_request(fcgi_request *req)
 	return 1;
 }
 
+// fastcgi读
 int fcgi_read(fcgi_request *req, char *str, int len)
 {
 	int ret, n, rest;
@@ -803,6 +835,9 @@ static int fcgi_is_allowed() {
 	return 0;
 }
 
+/*
+ 接收请求函数
+ */
 int fcgi_accept_request(fcgi_request *req)
 {
 #ifdef _WIN32
@@ -816,6 +851,8 @@ int fcgi_accept_request(fcgi_request *req)
 				if (in_shutdown) {
 					return -1;
 				}
+				
+				// for win
 #ifdef _WIN32
 				if (!req->tcp) {
 					pipe = (HANDLE)_get_osfhandle(req->listen_socket);
@@ -840,16 +877,34 @@ int fcgi_accept_request(fcgi_request *req)
 				} else {
 					SOCKET listen_socket = (SOCKET)_get_osfhandle(req->listen_socket);
 #else
+				// for win end
+				
 				{
 					int listen_socket = req->listen_socket;
+					
 #endif
 					sa_t sa;
 					socklen_t len = sizeof(sa);
 
+					// 更新scoreboard信息
 					fpm_request_accepting();
-
+					int current_pid = getpid();
+					
+					// 注意,此处的加锁逻辑实际是不必要的,因为:
+					// 不同worker进程之间对于socket fd是竞争的,不会同时有两个worker进程能accept同一个fd
+					// 那么如何保证这种平衡呢?
+					// 答案是: 没有必要
+					// 因为与nginx不同,fpm进程做的是一个CPU密集操作,因此accept一个连接,意味着这个worker进程会阻塞, 直到此次请求处理完毕
 					FCGI_LOCK(req->listen_socket);
 					req->fd = accept(listen_socket, (struct sockaddr *)&sa, &len);
+					//zlog(ZLOG_NOTICE, "pa -> func : accept fd[%d], current pid[%d], in_shutdown[%d], errno[%d], listen_socket[%d]", req->fd, current_pid, in_shutdown, errno, listen_socket);
+					
+#ifdef USE_LOCKING
+					//zlog(ZLOG_NOTICE, "pa -> use_locking is defined!");
+#else
+					//zlog(ZLOG_NOTICE, "pa -> use_locking is NOT defined!");
+#endif
+					// 为便于测试sleep一下
 					FCGI_UNLOCK(req->listen_socket);
 
 					client_sa = sa;
@@ -865,6 +920,7 @@ int fcgi_accept_request(fcgi_request *req)
 #else
 				if (req->fd < 0 && (in_shutdown || (errno != EINTR && errno != ECONNABORTED))) {
 #endif
+					zlog(ZLOG_NOTICE, "pa -> fail to accept request!");
 					return -1;
 				}
 
@@ -886,11 +942,13 @@ int fcgi_accept_request(fcgi_request *req)
 						ret = poll(&fds, 1, 5000);
 					} while (ret < 0 && errno == EINTR);
 					if (ret > 0 && (fds.revents & POLLIN)) {
+						zlog(ZLOG_NOTICE, "pa -> poll success, ret[%d]", ret);
 						break;
 					}
 					fcgi_close(req, 1, 0);
 #else
 					fpm_request_reading_headers();
+					zlog(ZLOG_NOTICE, "pa -> fpm_request_reading_headers");
 
 					if (req->fd < FD_SETSIZE) {
 						struct timeval tv = {5,0};
@@ -918,7 +976,9 @@ int fcgi_accept_request(fcgi_request *req)
 		} else if (in_shutdown) {
 			return -1;
 		}
+		// 读请求fastcgi
 		if (fcgi_read_request(req)) {
+			zlog(ZLOG_NOTICE, "pa -> fcgi_read_request");
 #ifdef _WIN32
 			if (is_impersonate && !req->tcp) {
 				pipe = (HANDLE)_get_osfhandle(req->fd);
@@ -973,6 +1033,11 @@ int fcgi_flush(fcgi_request *req, int close)
 		len += sizeof(fcgi_end_request_rec);
 	}
 
+	unsigned char* tmp_c = req->out_buf;
+
+	for(int i=0;i <= len; i++) {
+
+	}
 	if (safe_write(req, req->out_buf, len) != len) {
 		req->keep = 0;
 		req->out_pos = req->out_buf;
@@ -1066,6 +1131,9 @@ ssize_t fcgi_write(fcgi_request *req, fcgi_request_type type, const char *str, i
 	return len;
 }
 
+// 结束fastcgi的请求，主要工作就是两个
+// flush, 调用fcgi_flush刷新req中的buf
+// close, 调用fcgi_close，干一些关闭socket,回收request的资源等等的事情
 int fcgi_finish_request(fcgi_request *req, int force_close)
 {
 	int ret = 1;

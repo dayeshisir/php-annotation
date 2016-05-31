@@ -14,15 +14,19 @@
 
 struct fpm_event_s {
 	int fd;                   /* not set with FPM_EV_TIMEOUT */
+	// 触发间隔时间
 	struct timeval timeout;   /* next time to trigger */
 	struct timeval frequency;
 	void (*callback)(struct fpm_event_s *, short, void *);
 	void *arg;
 	int flags;
+	// 本fd在fd数组中的索引位置
 	int index;                /* index of the fd in the ufds array */
+	// 事件类型
 	short which;              /* type of event */
 };
 
+// fpm事件队列结构体
 typedef struct fpm_event_queue_s {
 	struct fpm_event_queue_s *prev;
 	struct fpm_event_queue_s *next;

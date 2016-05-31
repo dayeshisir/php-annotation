@@ -106,9 +106,9 @@ struct ini_value_parser_s {
 };
 
 enum {
-	PM_STYLE_STATIC = 1,
-	PM_STYLE_DYNAMIC = 2,
-	PM_STYLE_ONDEMAND = 3
+	PM_STYLE_STATIC = 1, // 静态
+	PM_STYLE_DYNAMIC = 2, // 动态
+	PM_STYLE_ONDEMAND = 3 // 按需
 };
 
 int fpm_conf_init_main(int test_conf, int force_daemon);

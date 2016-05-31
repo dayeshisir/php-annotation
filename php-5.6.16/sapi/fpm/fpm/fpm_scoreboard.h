@@ -17,6 +17,7 @@
 #define FPM_SCOREBOARD_ACTION_SET 0
 #define FPM_SCOREBOARD_ACTION_INC 1
 
+// 记分牌,记录请求的相关信息
 struct fpm_scoreboard_proc_s {
 	union {
 		atomic_t lock;
@@ -46,6 +47,7 @@ struct fpm_scoreboard_proc_s {
 	size_t memory;
 };
 
+// 记分牌整体的结构体,包含多个proc
 struct fpm_scoreboard_s {
 	union {
 		atomic_t lock;

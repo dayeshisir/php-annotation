@@ -32,6 +32,7 @@ static const char *requests_stages[] = {
 	[FPM_REQUEST_FINISHED]        = "Finishing",
 };
 
+// 返回fpm处理阶段的名字
 const char *fpm_request_get_stage_name(int stage) {
 	return requests_stages[stage];
 }
@@ -41,6 +42,7 @@ void fpm_request_accepting() /* {{{ */
 	struct fpm_scoreboard_proc_s *proc;
 	struct timeval now;
 
+	// 获取当前时间
 	fpm_clock_get(&now);
 
 	proc = fpm_scoreboard_proc_acquire(NULL, -1, 0);
@@ -102,10 +104,22 @@ void fpm_request_reading_headers() /* {{{ */
 }
 /* }}} */
 
+// 初始化fpm_request_info
 void fpm_request_info() /* {{{ */
 {
 	TSRMLS_FETCH();
+	// 记分牌,记录请求的相关信息
 	struct fpm_scoreboard_proc_s *proc;
+
+	//从SG全局变量中拿各种数据
+	/*
+	 * uri
+	 * method
+	 * filename
+	 * query_string
+	 * 等等
+	 */
+
 	char *request_uri = fpm_php_request_uri(TSRMLS_C);
 	char *request_method = fpm_php_request_method(TSRMLS_C);
 	char *script_filename = fpm_php_script_filename(TSRMLS_C);
@@ -116,6 +130,7 @@ void fpm_request_info() /* {{{ */
 
 	fpm_clock_get(&now);
 
+	// 拿到进程,加锁
 	proc = fpm_scoreboard_proc_acquire(NULL, -1, 0);
 	if (proc == NULL) {
 		zlog(ZLOG_WARNING, "failed to acquire proc scoreboard");
@@ -129,7 +144,7 @@ void fpm_request_info() /* {{{ */
 		strlcpy(proc->request_uri, request_uri, sizeof(proc->request_uri));
 	}
 
-	if (request_method) {
+	if (request_method) { // post, get, delete, or...
 		strlcpy(proc->request_method, request_method, sizeof(proc->request_method));
 	}
 
@@ -149,6 +164,7 @@ void fpm_request_info() /* {{{ */
 		strlcpy(proc->script_filename, script_filename, sizeof(proc->script_filename));
 	}
 
+	// 释放锁
 	fpm_scoreboard_proc_release(proc);
 }
 /* }}} */

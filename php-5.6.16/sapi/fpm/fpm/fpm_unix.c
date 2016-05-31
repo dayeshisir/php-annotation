@@ -441,22 +441,26 @@ int fpm_unix_init_child(struct fpm_worker_pool_s *wp) /* {{{ */
 }
 /* }}} */
 
+// 初始化unix
 int fpm_unix_init_main() /* {{{ */
 {
 	struct fpm_worker_pool_s *wp;
 	int is_root = !geteuid();
 
+	// 能够打开的最大的文件描述符数量
 	if (fpm_global_config.rlimit_files) {
 		struct rlimit r;
 
 		r.rlim_max = r.rlim_cur = (rlim_t) fpm_global_config.rlimit_files;
-
+		
+		// setrlimit和getrlimit系统调用
 		if (0 > setrlimit(RLIMIT_NOFILE, &r)) {
 			zlog(ZLOG_SYSERROR, "failed to set rlimit_core for this pool. Please check your system limits or decrease rlimit_files. setrlimit(RLIMIT_NOFILE, %d)", fpm_global_config.rlimit_files);
 			return -1;
 		}
 	}
 
+	// coredump的最大值
 	if (fpm_global_config.rlimit_core) {
 		struct rlimit r;
 
@@ -468,7 +472,10 @@ int fpm_unix_init_main() /* {{{ */
 		}
 	}
 
+	// linux页面大小
 	fpm_pagesize = getpagesize();
+	
+	// 在守护进程模式下，会folk出子进程,而前台进程会当Init完毕后退出程
 	if (fpm_global_config.daemonize) {
 		/*
 		 * If daemonize, the calling process will die soon
@@ -481,11 +488,11 @@ int fpm_unix_init_main() /* {{{ */
 		 * and \"0\" otherwise.
 		 */
 
-
 		struct timeval tv;
 		fd_set rfds;
 		int ret;
 
+		// 创建管道，将send_config_pipe两个文件描述符连接起来
 		if (pipe(fpm_globals.send_config_pipe) == -1) {
 			zlog(ZLOG_SYSERROR, "failed to create pipe");
 			return -1;
@@ -535,6 +542,9 @@ int fpm_unix_init_main() /* {{{ */
 						zlog(ZLOG_ERROR, "no data have been read from pipe");
 						exit(FPM_EXIT_SOFTWARE);
 					} else {
+						// 收到了数据
+						// 1表示初始化成功
+						// 0表示失败
 						if (readval == 1) {
 							zlog(ZLOG_DEBUG, "I received a valid acknoledge from the master process, I can exit without error");
 							fpm_cleanups_run(FPM_CLEANUP_PARENT_EXIT);
@@ -558,6 +568,7 @@ int fpm_unix_init_main() /* {{{ */
 		return -1;
 	}
 
+	// 设置php-fpm进程的优先级
 	if (fpm_global_config.process_priority != 64) {
 		if (is_root) {
 			if (setpriority(PRIO_PROCESS, 0, fpm_global_config.process_priority) < 0) {
@@ -569,6 +580,7 @@ int fpm_unix_init_main() /* {{{ */
 		}
 	}
 
+	// 设置master进程的pid
 	fpm_globals.parent_pid = getpid();
 	for (wp = fpm_worker_all_pools; wp; wp = wp->next) {
 		if (0 > fpm_unix_conf_wp(wp)) {

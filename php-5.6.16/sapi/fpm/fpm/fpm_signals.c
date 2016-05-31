@@ -183,11 +183,13 @@ int fpm_signals_init_main() /* {{{ */
 {
 	struct sigaction act;
 
+	// 创建socket pair
 	if (0 > socketpair(AF_UNIX, SOCK_STREAM, 0, sp)) {
 		zlog(ZLOG_SYSERROR, "failed to init signals: socketpair()");
 		return -1;
 	}
 
+	// 设置非阻塞
 	if (0 > fd_set_blocked(sp[0], 0) || 0 > fd_set_blocked(sp[1], 0)) {
 		zlog(ZLOG_SYSERROR, "failed to init signals: fd_set_blocked()");
 		return -1;

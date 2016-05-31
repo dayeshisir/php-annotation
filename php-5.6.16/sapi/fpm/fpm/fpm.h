@@ -40,7 +40,7 @@ int fpm_run(int *max_requests);
 int fpm_init(int argc, char **argv, char *config, char *prefix, char *pid, int test_conf, int run_as_root, int force_daemon, int force_stderr);
 
 struct fpm_globals_s {
-	pid_t parent_pid;
+	pid_t parent_pid; // 父进程的id
 	int argc;
 	char **argv;
 	char *config;
@@ -56,7 +56,7 @@ struct fpm_globals_s {
 	int heartbeat;
 	int run_as_root;
 	int force_stderr;
-	int send_config_pipe[2];
+	int send_config_pipe[2]; // TODO
 };
 
 extern struct fpm_globals_s fpm_globals;

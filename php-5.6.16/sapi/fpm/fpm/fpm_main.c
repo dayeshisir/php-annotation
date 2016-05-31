@@ -6,7 +6,7 @@
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
-   | available through the world-wide-web at the following url:           |
+   | available through the world-wide-web at the flowing url:           |
    | http://www.php.net/license/3_01.txt                                  |
    | If you did not receive a copy of the PHP license and are unable to   |
    | obtain it through the world-wide-web, please send a note to          |
@@ -137,7 +137,7 @@ static void fastcgi_ini_parser(zval *arg1, zval *arg2, zval *arg3, int callback_
 #define PHP_MODE_STRIP		5
 
 static char *php_optarg = NULL;
-static int php_optind = 1;
+static int php_optind = 1; // 参数数量?
 static zend_module_entry cgi_module_entry;
 
 static const opt_struct OPTIONS[] = {
@@ -783,6 +783,8 @@ static int sapi_cgi_activate(TSRMLS_D)
 	if (php_ini_has_per_host_config()) {
 		/* Activate per-host-system-configuration defined in php.ini and stored into configuration_hash during startup */
 		server_name = sapi_cgibin_getenv("SERVER_NAME", sizeof("SERVER_NAME") - 1 TSRMLS_CC);
+
+		
 		/* SERVER_NAME should also be defined at this stage..but better check it anyway */
 		if (server_name) {
 			server_name_len = strlen(server_name);
@@ -861,6 +863,7 @@ static int sapi_cgi_deactivate(TSRMLS_D)
 
 static int php_cgi_startup(sapi_module_struct *sapi_module)
 {
+	// 调用php_module_startup函数初始化php模块
 	if (php_module_startup(sapi_module, &cgi_module_entry, 1) == FAILURE) {
 		return FAILURE;
 	}
@@ -1052,7 +1055,11 @@ static int is_valid_path(const char *path)
   QUERY_STRING=a=b
 
   Comments in the code below refer to using the above URL in a request
+ */
 
+/*
+ pa:
+ 初始化request_info结构体
  */
 static void init_request_info(TSRMLS_D)
 {
@@ -1570,10 +1577,14 @@ static zend_module_entry cgi_module_entry = {
 
 /* {{{ main
  */
+// php-fpm的主函数
 int main(int argc, char *argv[])
 {
+	// 全局变量区
 	int exit_status = FPM_EXIT_OK;
 	int cgi = 0, c, use_extended_info = 0;
+	
+	// zend_file_handle,用于打开php文件
 	zend_file_handle file_handle;
 
 	/* temporary locals */
@@ -1585,10 +1596,13 @@ int main(int argc, char *argv[])
 #ifdef ZTS
 	void ***tsrm_ls;
 #endif
-
-	int max_requests = 500;
+	// 超过max_request之后，worker进程将会重启,主要作用是为了消除扩展可能存在的内存泄露问题
+	int max_requests = 500; 
+	
 	int requests = 0;
 	int fcgi_fd = 0;
+	
+	// 请求相关结构体
 	fcgi_request request;
 	char *fpm_config = NULL;
 	char *fpm_prefix = NULL;
@@ -1601,6 +1615,10 @@ int main(int argc, char *argv[])
 
 #ifdef HAVE_SIGNAL_H
 #if defined(SIGPIPE) && defined(SIG_IGN)
+	/* 设置忽略SIGPIPE信号:
+	 * 当运行在standalone模式下的时候，通过fsockopen创建的socket，当远程站点关闭的时候，不会引起进程被杀死
+	 * 内核当一个管道的读端已经关闭，仍尝试对这个管道写入时，会触发SIGPIPE信号，进程默认的处理动作就是杀死进程。
+	 */
 	signal(SIGPIPE, SIG_IGN); /* ignore SIGPIPE in standalone mode so
 								that sockets created via fsockopen()
 								don't kill PHP if the remote site
@@ -1610,16 +1628,19 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
+	// 线程安全相关的配置
 #ifdef ZTS
 	tsrm_startup(1, 1, 0, NULL);
 	tsrm_ls = ts_resource(0);
 #endif
 
+	// 初始化sapi的相关结构体
 	sapi_startup(&cgi_sapi_module);
 	cgi_sapi_module.php_ini_path_override = NULL;
 	cgi_sapi_module.php_ini_ignore_cwd = 1;
 	
-	fcgi_init();
+	// fastcgi初始化:非win环境下就是初始化信号
+	fcgi_init(); 
 
 #ifdef PHP_WIN32
 	_fmode = _O_BINARY; /* sets default for file streams to binary */
@@ -1628,6 +1649,7 @@ int main(int argc, char *argv[])
 	setmode(_fileno(stderr), O_BINARY);	/* make the stdio mode be binary */
 #endif
 
+	// 读取命令行参数
 	while ((c = php_getopt(argc, argv, OPTIONS, &php_optarg, &php_optind, 0, 2)) != -1) {
 		switch (c) {
 			case 'c':
@@ -1708,6 +1730,7 @@ int main(int argc, char *argv[])
 				exit_status = FPM_EXIT_OK;
 				goto out;
 
+			// 打印phpinfo
 			case 'i': /* php info & quit */
 				php_information = 1;
 				break;
@@ -1763,6 +1786,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	// 打印php_information
 	if (php_information) {
 		cgi_sapi_module.phpinfo_as_text = 1;
 		cgi_sapi_module.startup(&cgi_sapi_module);
@@ -1781,6 +1805,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* No other args are permitted here as there is no interactive mode */
+	// 交互模式下不允许接受更多参数
 	if (argc != php_optind) {
 		cgi_sapi_module.startup(&cgi_sapi_module);
 		php_output_activate(TSRMLS_C);
@@ -1804,6 +1829,7 @@ int main(int argc, char *argv[])
 	cgi_sapi_module.executable_location = argv[0];
 
 	/* startup after we get the above ini override se we get things right */
+	// 回调startup初始化
 	if (cgi_sapi_module.startup(&cgi_sapi_module) == FAILURE) {
 #ifdef ZTS
 		tsrm_shutdown();
@@ -1855,8 +1881,12 @@ consult the installation file that came with this distribution, or visit \n\
 		}
 	}
 
+	// 真正初始化php-fpm
+	// 注意,若此时fpm运行在daemonize下,会folk出新进程作为后台进程,最初前台进程当init结束后退出
+	// 这个后台进程即fpm范畴的master进程
 	if (0 > fpm_init(argc, argv, fpm_config ? fpm_config : CGIG(fpm_config), fpm_prefix, fpm_pid, test_conf, php_allow_to_run_as_root, force_daemon, force_stderr)) {
 
+		// 初始化失败,通过管道向子进程发送失败(Error)信号
 		if (fpm_globals.send_config_pipe[1]) {
 			int writeval = 0;
 			zlog(ZLOG_DEBUG, "Sending \"0\" (error) to parent via fd=%d", fpm_globals.send_config_pipe[1]);
@@ -1866,14 +1896,18 @@ consult the installation file that came with this distribution, or visit \n\
 		return FPM_EXIT_CONFIG;
 	}
 
+	// 如果fd创建成功，向它写入1，告诉原始的主进程初始化完毕，可以退出
 	if (fpm_globals.send_config_pipe[1]) {
 		int writeval = 1;
 		zlog(ZLOG_DEBUG, "Sending \"1\" (OK) to parent via fd=%d", fpm_globals.send_config_pipe[1]);
 		write(fpm_globals.send_config_pipe[1], &writeval, sizeof(writeval));
 		close(fpm_globals.send_config_pipe[1]);
 	}
+
+	// 标识fpm开始运行
 	fpm_is_running = 1;
 
+	// 在fpm-run中folk出worker进程，master进程不会跳出这个函数,亦后面的都是子进程逻辑
 	fcgi_fd = fpm_run(&max_requests);
 	parent = 0;
 
@@ -1885,20 +1919,25 @@ consult the installation file that came with this distribution, or visit \n\
 	php_import_environment_variables = cgi_php_import_environment_variables;
 
 	/* library is already initialized, now init our request */
+	// 初始化请求相关结构体
+	// 不是每次都需要init
 	fcgi_init_request(&request, fcgi_fd);
 
 	zend_first_try {
+		// worker进程死循环接受请求
 		while (fcgi_accept_request(&request) >= 0) {
+			zlog(ZLOG_NOTICE, "pa -> execute request after fcgi_accept_request");
+			// worker子进程死循环接收用户的请求
 			char *primary_script = NULL;
 			request_body_fd = -1;
 			SG(server_context) = (void *) &request;
 			init_request_info(TSRMLS_C);
 			CG(interactive) = 0;
 
-			fpm_request_info();
+			fpm_request_info(); // 将获取到的请求信息写到scoreboard中，记录状态
 
 			/* request startup only after we've done all we can to
-			 *            get path_translated */
+			 * get path_translated */
 			if (php_request_startup(TSRMLS_C) == FAILURE) {
 				fcgi_finish_request(&request, 1);
 				SG(server_context) = NULL;
@@ -1917,11 +1956,11 @@ consult the installation file that came with this distribution, or visit \n\
 			}
 
 			/* If path_translated is NULL, terminate here with a 404 */
+			// path_translated就是处理完的php脚本的路径
 			if (!SG(request_info).path_translated) {
 				zend_try {
-					zlog(ZLOG_DEBUG, "Primary script unknown");
 					SG(sapi_headers).http_response_code = 404;
-					PUTS("File not found.\n");
+					PUTS("File not find\n");
 				} zend_catch {
 				} zend_end_try();
 				goto fastcgi_request_done;
@@ -1938,8 +1977,11 @@ consult the installation file that came with this distribution, or visit \n\
 			 * php_fopen_primary_script seems to delete SG(request_info).path_translated on failure
 			 */
 			primary_script = estrdup(SG(request_info).path_translated);
+			// 执行的脚本的完整路径
+			// zlog(ZLOG_NOTICE, "pa -> Primary script : %s", primary_script);
 
 			/* path_translated exists, we can continue ! */
+			// 打开脚本文件
 			if (php_fopen_primary_script(&file_handle TSRMLS_CC) == FAILURE) {
 				zend_try {
 					zlog(ZLOG_ERROR, "Unable to open primary script: %s (%s)", primary_script, strerror(errno));
@@ -1956,13 +1998,18 @@ consult the installation file that came with this distribution, or visit \n\
 				 * so cleanup and continue, request shutdown is
 				 * handled later */
 
+				// 打开文件失败了，进入请求结束处理流程
+				zlog(ZLOG_NOTICE, "goto fastcgi_request_done");
 				goto fastcgi_request_done;
 			}
-
+			
+			// 操作scoreboard相关数据,scoreboard即一个在共享内存存储的worker相关信息的数据结构
 			fpm_request_executing();
 
+			// 执行php脚本,这里已经和fpm解耦
 			php_execute_script(&file_handle TSRMLS_CC);
 
+			// fastcgi请求回收流程
 fastcgi_request_done:
 			if (primary_script) {
 				efree(primary_script);
@@ -1989,14 +2036,21 @@ fastcgi_request_done:
 			STR_FREE(SG(request_info).path_translated);
 			SG(request_info).path_translated = NULL;
 
+			// 传说中的PHP RSHUTDOWN,即每次请求的析构操作
 			php_request_shutdown((void *) 0);
 
 			requests++;
+			
+			// 记录每个worker已经处理了的请求数量,如果超过了max值，则进入销毁worker的逻辑
+			// zlog(ZLOG_NOTICE, "request count : %d, max request[%d]", requests, max_requests);
 			if (max_requests && (requests == max_requests)) {
+				zlog(ZLOG_NOTICE, "reach max request[%d]", max_requests);
+				// 达到max_request后，worker进程将会重启
 				fcgi_finish_request(&request, 1);
 				break;
 			}
 			/* end of fastcgi loop */
+			// fastcgi循环结束条件
 		}
 		fcgi_shutdown();
 
@@ -2015,6 +2069,7 @@ out:
 	SG(server_context) = NULL;
 	php_module_shutdown(TSRMLS_C);
 
+	// 回收sapi资源
 	if (parent) {
 		sapi_shutdown();
 	}
@@ -2027,6 +2082,7 @@ out:
 	_CrtDumpMemoryLeaks();
 #endif
 
+	zlog(ZLOG_NOTICE, "pa -> exit at last, worker is destroyed");
 	return exit_status;
 }
 /* }}} */

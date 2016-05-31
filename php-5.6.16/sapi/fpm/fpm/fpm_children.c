@@ -365,6 +365,7 @@ int fpm_children_make(struct fpm_worker_pool_s *wp, int in_event_loop, int nb_to
 	int max;
 	static int warned = 0;
 
+	// 根据类型,设置max值
 	if (wp->config->pm == PM_STYLE_DYNAMIC) {
 		if (!in_event_loop) { /* starting */
 			max = wp->config->pm_start_servers;
@@ -381,15 +382,19 @@ int fpm_children_make(struct fpm_worker_pool_s *wp, int in_event_loop, int nb_to
 		max = wp->config->pm_max_children;
 	}
 
+	
 	/*
 	 * fork children while:
 	 *   - fpm_pctl_can_spawn_children : FPM is running in a NORMAL state (aka not restart, stop or reload)
+	 *   - check fpm 运行状态是否正常,不是restart/stop/reload
 	 *   - wp->running_children < max  : there is less than the max process for the current pool
+	 *   - 确保进程数量
 	 *   - (fpm_global_config.process_max < 1 || fpm_globals.running_children < fpm_global_config.process_max):
 	 *     if fpm_global_config.process_max is set, FPM has not fork this number of processes (globaly)
 	 */
 	while (fpm_pctl_can_spawn_children() && wp->running_children < max && (fpm_global_config.process_max < 1 || fpm_globals.running_children < fpm_global_config.process_max)) {
 
+		zlog(ZLOG_NOTICE, "pa -> fpm_children_make while : fpm_global_config.process_max[%d], max[%d]", fpm_global_config.process_max, max);
 		warned = 0;
 		child = fpm_resources_prepare(wp);
 
@@ -414,6 +419,7 @@ int fpm_children_make(struct fpm_worker_pool_s *wp, int in_event_loop, int nb_to
 				return 2;
 
 			default :
+				// 父进程逻辑
 				child->pid = pid;
 				fpm_clock_get(&child->started);
 				fpm_parent_resources_use(child);

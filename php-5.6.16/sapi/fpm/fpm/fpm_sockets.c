@@ -160,12 +160,14 @@ static int fpm_sockets_hash_op(int sock, struct sockaddr *sa, char *key, int typ
 }
 /* }}} */
 
+// 传统的socket通信流程
 static int fpm_sockets_new_listening_socket(struct fpm_worker_pool_s *wp, struct sockaddr *sa, int socklen) /* {{{ */
 {
 	int flags = 1;
 	int sock;
 	mode_t saved_umask = 0;
 
+	// 创建socket
 	sock = socket(sa->sa_family, SOCK_STREAM, 0);
 
 	if (0 > sock) {
@@ -173,10 +175,12 @@ static int fpm_sockets_new_listening_socket(struct fpm_worker_pool_s *wp, struct
 		return -1;
 	}
 
+	// 设置socket参数
 	if (0 > setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flags, sizeof(flags))) {
 		zlog(ZLOG_WARNING, "failed to change socket attribute");
 	}
 
+	// unix_socket
 	if (wp->listen_address_domain == FPM_AF_UNIX) {
 		if (fpm_socket_unix_test_connect((struct sockaddr_un *)sa, socklen) == 0) {
 			zlog(ZLOG_ERROR, "An another FPM instance seems to already listen on %s", ((struct sockaddr_un *) sa)->sun_path);
@@ -187,6 +191,7 @@ static int fpm_sockets_new_listening_socket(struct fpm_worker_pool_s *wp, struct
 		saved_umask = umask(0777 ^ wp->socket_mode);
 	}
 
+	zlog(ZLOG_NOTICE, "pa -> bind socket [%s]", wp->config->listen_address);
 	if (0 > bind(sock, sa, socklen)) {
 		zlog(ZLOG_SYSERROR, "unable to bind listening socket for address '%s'", wp->config->listen_address);
 		if (wp->listen_address_domain == FPM_AF_UNIX) {
@@ -250,6 +255,7 @@ static int fpm_socket_af_inet_listening_socket(struct fpm_worker_pool_s *wp) /* 
 {
 	struct addrinfo hints, *servinfo, *p;
 	char *dup_address = strdup(wp->config->listen_address);
+	// 获取port
 	char *port_str = strrchr(dup_address, ':');
 	char *addr = NULL;
 	char tmpbuf[INET6_ADDRSTRLEN];
@@ -295,6 +301,7 @@ static int fpm_socket_af_inet_listening_socket(struct fpm_worker_pool_s *wp) /* 
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 
+	zlog(ZLOG_NOTICE, "pa -> func : 监听socket, addr[%s]", addr);
 	if ((status = getaddrinfo(addr, port_str, &hints, &servinfo)) != 0) {
 		zlog(ZLOG_ERROR, "getaddrinfo: %s\n", gai_strerror(status));
 		free(dup_address);
@@ -342,6 +349,7 @@ int fpm_sockets_init_main() /* {{{ */
 	}
 
 	/* import inherited sockets */
+	// 导入继承的socket
 	while (inherited && *inherited) {
 		char *comma = strchr(inherited, ',');
 		int type, fd_no;
@@ -368,7 +376,10 @@ int fpm_sockets_init_main() /* {{{ */
 	}
 
 	/* create all required sockets */
+	// add by pa
+	int worker_count = 1;
 	for (wp = fpm_worker_all_pools; wp; wp = wp->next) {
+		zlog(ZLOG_NOTICE, "pa -> create socket, worker_pool_count[%d]", worker_count++);
 		switch (wp->listen_address_domain) {
 			case FPM_AF_INET :
 				wp->listening_socket = fpm_socket_af_inet_listening_socket(wp);
@@ -385,7 +396,7 @@ int fpm_sockets_init_main() /* {{{ */
 		if (wp->listening_socket == -1) {
 			return -1;
 		}
-
+		
 	if (wp->listen_address_domain == FPM_AF_INET && fpm_socket_get_listening_queue(wp->listening_socket, NULL, &lq_len) >= 0) {
 			fpm_scoreboard_update(-1, -1, -1, (int)lq_len, -1, -1, 0, FPM_SCOREBOARD_ACTION_SET, wp->scoreboard);
 		}

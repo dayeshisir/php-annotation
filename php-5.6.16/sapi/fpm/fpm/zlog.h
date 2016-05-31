@@ -24,6 +24,7 @@ void zlog_ex(const char *function, int line, int flags, const char *fmt, ...)
 extern const int syslog_priorities[];
 #endif
 
+// 日志等级变量，级别递增
 enum {
 	ZLOG_DEBUG			= 1,
 	ZLOG_NOTICE			= 2,

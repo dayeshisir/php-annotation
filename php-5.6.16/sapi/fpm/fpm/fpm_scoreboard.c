@@ -83,8 +83,9 @@ void fpm_scoreboard_update(int idle, int active, int lq, int lq_len, int request
 		return;
 	}
 
-
+	// 加锁
 	fpm_spinlock(&scoreboard->lock, 0);
+	// 初始化和自增两种操作:SET and INC
 	if (action == FPM_SCOREBOARD_ACTION_SET) {
 		if (idle >= 0) {
 			scoreboard->idle = idle;
@@ -149,6 +150,7 @@ void fpm_scoreboard_update(int idle, int active, int lq, int lq_len, int request
 		scoreboard->active_max = scoreboard->active;
 	}
 
+	// 释放锁
 	fpm_unlock(scoreboard->lock);
 }
 /* }}} */
@@ -210,14 +212,16 @@ struct fpm_scoreboard_proc_s *fpm_scoreboard_proc_acquire(struct fpm_scoreboard_
 	struct fpm_scoreboard_proc_s *proc;
 
 	proc = fpm_scoreboard_proc_get(scoreboard, child_index);
+	
 	if (!proc) {
 		return NULL;
 	}
-
+	
+	// 加锁
 	if (!fpm_spinlock(&proc->lock, nohang)) {
 		return NULL;
 	}
-
+	
 	return proc;
 }
 /* }}} */

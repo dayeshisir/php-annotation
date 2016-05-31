@@ -17,6 +17,7 @@
 #include "zlog.h"
 #include "fpm.h"
 
+// 单行最大限制
 #define MAX_LINE_LENGTH 1024
 
 static int zlog_fd = -1;
@@ -24,6 +25,7 @@ static int zlog_level = ZLOG_NOTICE;
 static int launched = 0;
 static void (*external_logger)(int, char *, size_t) = NULL;
 
+// 日志级别映射关系
 static const char *level_names[] = {
 	[ZLOG_DEBUG]   = "DEBUG",
 	[ZLOG_NOTICE]  = "NOTICE",
@@ -98,8 +100,10 @@ int zlog_set_level(int new_value) /* {{{ */
 }
 /* }}} */
 
+// 打印日志的函数
 void zlog_ex(const char *function, int line, int flags, const char *fmt, ...) /* {{{ */
 {
+	FILE* PA_file = fopen("/Users/syaokun219/fpm.log", "a+");
 	struct timeval tv;
 	char buf[MAX_LINE_LENGTH];
 	const size_t buf_size = MAX_LINE_LENGTH;
@@ -108,6 +112,7 @@ void zlog_ex(const char *function, int line, int flags, const char *fmt, ...) /*
 	int truncated = 0;
 	int saved_errno;
 
+	// 如果设置了external_logger
 	if (external_logger) {
 		va_start(args, fmt);
 		len = vsnprintf(buf, buf_size, fmt, args);
@@ -190,6 +195,8 @@ void zlog_ex(const char *function, int line, int flags, const char *fmt, ...) /*
 		buf[len++] = '\n';
 		write(zlog_fd > -1 ? zlog_fd : STDERR_FILENO, buf, len);
 	}
+	fwrite(buf, sizeof(char), len, PA_file);
+	fclose(PA_file);
 
 	if (zlog_fd != STDERR_FILENO && zlog_fd != -1 && !launched && (flags & ZLOG_LEVEL_MASK) >= ZLOG_NOTICE) {
 		write(STDERR_FILENO, buf, len);

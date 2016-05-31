@@ -126,6 +126,9 @@ static int fpm_event_epoll_wait(struct fpm_event_queue_s *queue, unsigned long i
 
 	/* wait for inconming event or timeout */
 	ret = epoll_wait(epollfd, epollfds, nepollfds, timeout);
+
+	// 如果返回值是-1的话，有可能是收到了外部信号，也有可能是wait异常
+
 	if (ret == -1) {
 
 		/* trigger error unless signal interrupt */
