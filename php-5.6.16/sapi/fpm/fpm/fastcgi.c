@@ -345,7 +345,7 @@ static inline ssize_t safe_write(fcgi_request *req, const void *buf, size_t coun
 #else
 		ret = write(req->fd, ((char*)buf)+n, count-n);
 		// patodo : 为什么buf的内容打不出来?
-		zlog(ZLOG_NOTICE, "pa -> func safe_write : bufsize[%d], buf[%s], current_offset[%d], succ_buf_write[%d]", count, buf, n, ret);
+		// zlog(ZLOG_NOTICE, "pa -> func safe_write : bufsize[%d], buf[%s], current_offset[%d], succ_buf_write[%d]", count, buf, n, ret);
 #endif
 		if (ret > 0) {
 			n += ret;

@@ -1,6 +1,6 @@
 PHP_ARG_ENABLE(syaokun219,
     [Whether to enable the "syaokun219" extension],
-    [  enable-syaokun219        Enable "syaokun219" extension support])
+    [  --enable-syaokun219     Enable "syaokun219" extension support])
 
 if test $PHP_SYAOKUN219 != "no"; then
     PHP_SUBST(SYAOKUN219_SHARED_LIBADD)

@@ -22,6 +22,7 @@
 #ifndef ZEND_LLIST_H
 #define ZEND_LLIST_H
 
+// zend 双向链表
 typedef struct _zend_llist_element {
 	struct _zend_llist_element *next;
 	struct _zend_llist_element *prev;
@@ -40,7 +41,7 @@ typedef struct _zend_llist {
 	size_t count;
 	size_t size;
 	llist_dtor_func_t dtor;
-	unsigned char persistent;
+	unsigned char persistent; //patodo
 	zend_llist_element *traverse_ptr;
 } zend_llist;
 
