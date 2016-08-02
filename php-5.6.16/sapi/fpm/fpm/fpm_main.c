@@ -327,7 +327,7 @@ static void sapi_cgibin_flush(void *server_context)
 #endif
 	      request && !fcgi_flush(request, 0)) {
 			php_handle_aborted_connection();
-		}
+                }
 		return;
 	}
 
@@ -389,9 +389,10 @@ static const http_error http_error_codes[] = {
 	{0,   NULL}
 };
 
+// http://my.oschina.net/miaowang/blog/299546
 static int sapi_cgi_send_headers(sapi_headers_struct *sapi_headers TSRMLS_DC)
 {
-	char buf[SAPI_CGI_MAX_HEADER_LENGTH];
+	char buf[SAPI_CGI_MAX_HEADER_LENGTH];     // 1024
 	sapi_header_struct *h;
 	zend_llist_position pos;
 	zend_bool ignore_status = 0;
@@ -400,12 +401,14 @@ static int sapi_cgi_send_headers(sapi_headers_struct *sapi_headers TSRMLS_DC)
 	if (SG(request_info).no_headers == 1) {
 		return  SAPI_HEADER_SENT_SUCCESSFULLY;
 	}
-
+        
+        // nph:on 在CGI模式下是否强制对所有请求都发送"Status: 200"状态码
 	if (CGIG(nph) || SG(sapi_headers).http_response_code != 200)
 	{
 		int len;
 		zend_bool has_status = 0;
-
+                
+                // rfc2616_headers: on PHP使用RFC2616标准的头
 		if (CGIG(rfc2616_headers) && SG(sapi_headers).http_status_line) {
 			char *s;
 			len = slprintf(buf, SAPI_CGI_MAX_HEADER_LENGTH, "%s\r\n", SG(sapi_headers).http_status_line);
@@ -418,6 +421,7 @@ static int sapi_cgi_send_headers(sapi_headers_struct *sapi_headers TSRMLS_DC)
 			}
 
 		} else {
+                        // 发送一个"Status: "报头
 			char *s;
 
 			if (SG(sapi_headers).http_status_line &&
