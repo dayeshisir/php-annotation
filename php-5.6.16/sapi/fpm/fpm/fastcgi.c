@@ -201,6 +201,8 @@ int fcgi_init(void)
 		zend_hash_init(&fcgi_mgmt_vars, 0, NULL, fcgi_free_mgmt_var_cb, 1);
 		
 		// FCGI_MPXS_CONNS是fastcgi协议中规定的字段
+                // 如果应用不用 多路复用线路（也就是通过每个线路处理并发请求）则为 "0"，其他则为"1"
+                // come from http://www.myexception.cn/cgi/674116.html
 		fcgi_set_mgmt_var("FCGI_MPXS_CONNS", sizeof("FCGI_MPXS_CONNS") - 1, "0", sizeof("0")-1);
 
 		is_initialized = 1;
@@ -218,7 +220,7 @@ int fcgi_init(void)
 # endif
 		{
 			char *str;
-			DWORD pipe_mode = PIPE_READMODE_BYTE | PIPE_WAIT;
+			DWORD pipe_mode = PIPE_READMODE_BYTE | PIPE_WAIT; // 数据以单独字节的形式从管道中读出 | 			DWORD pipe_mode = PIPE_READMODE_BYTE | PIPE_WAIT; // 数据以单独字节的形式从管道中读出 | 同步操作在等待的时候挂起线程
 			HANDLE pipe = GetStdHandle(STD_INPUT_HANDLE);
 
 			SetNamedPipeHandleState(pipe, &pipe_mode, NULL, NULL);
@@ -268,9 +270,9 @@ void fcgi_set_allowed_clients(char *ip)
 	int n;
 
 	if (ip) {
-		ip = strdup(ip);
+		ip = strdup(ip);  // 为啥要拷贝一份呢
 		cur = ip;
-		n = 0;
+		n = 0;            // client的个数 - 1
 		while (*cur) {
 			if (*cur == ',') n++;
 			cur++;
@@ -458,11 +460,18 @@ static inline int fcgi_param_get_eff_len( unsigned char *p, unsigned char *end, 
 	return ret;
 }
 
+/**
+ * @desc 将请求中的参数写入请求的环境变量中
+ * @param req
+ * @param p
+ * @param end
+ * @return 
+ */
 static int fcgi_get_params(fcgi_request *req, unsigned char *p, unsigned char *end)
 {
 	char buf[128];
 	char *tmp = buf;
-	size_t buf_size = sizeof(buf);
+	size_t buf_size = sizeof(buf);     // 128
 	int name_len = 0;
 	int val_len = 0;
 	uint eff_name_len = 0;
@@ -471,6 +480,7 @@ static int fcgi_get_params(fcgi_request *req, unsigned char *p, unsigned char *e
 	size_t bytes_consumed;
 
 	while (p < end) {
+                // 参数名的长度
 		bytes_consumed = fcgi_get_params_len(&name_len, p, end);
 		if (!bytes_consumed) {
 			/* Malformated request */
@@ -478,6 +488,8 @@ static int fcgi_get_params(fcgi_request *req, unsigned char *p, unsigned char *e
 			break;
 		}
 		p += bytes_consumed;
+                
+                // 参数值的长度
 		bytes_consumed = fcgi_get_params_len(&val_len, p, end);
 		if (!bytes_consumed) {
 			/* Malformated request */
@@ -495,14 +507,15 @@ static int fcgi_get_params(fcgi_request *req, unsigned char *p, unsigned char *e
 		/*
 		 * get the effective length of the name in case it's not a valid string
 		 * don't do this on the value because it can be binary data
+                 * 考虑参数名中填充,这里取出参数名实际长度
 		 */
 		if (!fcgi_param_get_eff_len(p, p+name_len, &eff_name_len)){
 			/* Malicious request */
 			ret = 0;
 			break;
 		}
-		if (eff_name_len >= buf_size-1) {
-			if (eff_name_len > ((uint)-1)-64) { 
+		if (eff_name_len >= buf_size-1) {  // 127 参数名长度是一个字节,否则是4个字节
+			if (eff_name_len > ((uint)-1)-64) {  // 这里的64 估计是对齐用的 (尚未验证)
 				ret = 0;
 				break;
 			}
@@ -513,14 +526,14 @@ static int fcgi_get_params(fcgi_request *req, unsigned char *p, unsigned char *e
 				break;
 			}
 		}
-		memcpy(tmp, p, eff_name_len);
+		memcpy(tmp, p, eff_name_len);                   // 参数名 
 		tmp[eff_name_len] = 0;
-		s = estrndup((char*)p + name_len, val_len);
+		s = estrndup((char*)p + name_len, val_len);     // 参数值
 		if (s == NULL) {
 			ret = 0;
 			break;
 		}
-		zend_hash_update(req->env, tmp, eff_name_len+1, &s, sizeof(char*), NULL);
+		zend_hash_update(req->env, tmp, eff_name_len+1, &s, sizeof(char*), NULL);    // 写入环境标量中
 		p += name_len + val_len;
 	}
 	if (tmp != buf && tmp != NULL) {
@@ -583,6 +596,8 @@ static int fcgi_read_request(fcgi_request *req)
 		req->keep = (((fcgi_begin_request*)buf)->flags & FCGI_KEEP_CONN);
 		switch ((((fcgi_begin_request*)buf)->roleB1 << 8) + ((fcgi_begin_request*)buf)->roleB0) {
 			case FCGI_RESPONDER:
+                                // Like strdup but never fails
+                                // http://opensource.apple.com//source/Heimdal/Heimdal-172.27/lib/roken/estrdup.c
 				val = estrdup("RESPONDER");
 				zend_hash_update(req->env, "FCGI_ROLE", sizeof("FCGI_ROLE"), &val, sizeof(char*), NULL);
 				break;
