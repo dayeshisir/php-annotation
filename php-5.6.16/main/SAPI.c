@@ -724,6 +724,7 @@ SAPI_API int sapi_header_op(sapi_header_op_enum op, void *arg TSRMLS_DC)
 			return FAILURE;
 	}
 
+        // 只有 ADD REPLACE DELETE 才会进入这里
 	header_line = estrndup(header_line, header_line_len);
 
 	/* cut off trailing spaces, linefeeds and carriage-returns */
@@ -737,6 +738,7 @@ SAPI_API int sapi_header_op(sapi_header_op_enum op, void *arg TSRMLS_DC)
 	if (op == SAPI_HEADER_DELETE) {
 		if (strchr(header_line, ':')) {
 			efree(header_line);
+                        // colon 若然是 冒号 的意思 我太聪明了  哈哈哈
 			sapi_module.sapi_error(E_WARNING, "Header to delete may not contain colon.");
 			return FAILURE;
 		}
@@ -869,7 +871,7 @@ SAPI_API int sapi_send_headers(TSRMLS_D)
 	 */
 	if (SG(sapi_headers).send_default_content_type && sapi_module.send_headers) {
 		sapi_header_struct default_header;
-	    uint len;
+                uint len;
 
 		SG(sapi_headers).mimetype = get_default_content_type(0, &len TSRMLS_CC);
 		default_header.header_len = sizeof("Content-type: ") - 1 + len;
