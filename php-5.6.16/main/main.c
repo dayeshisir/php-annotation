@@ -2156,7 +2156,7 @@ int php_module_startup(sapi_module_struct *sf, zend_module_entry *additional_mod
 		}
 	}
 #endif
-	EG(bailout) = NULL;
+	EG(bailout) = NULL;                         // bailout : 紧急援助;跳伞;抽资
 	EG(error_reporting) = E_ALL & ~E_NOTICE;
 	EG(active_symbol_table) = NULL;
 	PG(header_is_being_sent) = 0;

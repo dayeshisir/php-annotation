@@ -4,4 +4,33 @@
         <activeConfTypeElem>0</activeConfTypeElem>
         <activeConfIndexElem>0</activeConfIndexElem>
     </data>
+    <editor-bookmarks xmlns="http://www.netbeans.org/ns/editor-bookmarks/2" lastBookmarkId="0"/>
+    <open-files xmlns="http://www.netbeans.org/ns/projectui-open-files/2">
+        <group>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/fopen_wrappers.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/snprintf.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_getopt.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/fopen_wrappers.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/Zend/RFCs/003.txt</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_variables.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_variables.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/main.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/spprintf.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/SAPI.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/rfc1867.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_globals.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_sprintf.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/spprintf.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/getopt.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/SAPI.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/rfc1867.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/Zend/RFCs/001.txt</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/Zend/zend.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_ticks.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_reentrancy.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_ticks.c</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/Zend/zend_llist.h</file>
+            <file>file:/Users/sirshi/Study/pa/php-annotation/php-5.6.16/main/php_streams.h</file>
+        </group>
+    </open-files>
 </project-private>

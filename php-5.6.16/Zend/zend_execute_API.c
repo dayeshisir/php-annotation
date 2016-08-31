@@ -1344,6 +1344,11 @@ void zend_unset_timeout(TSRMLS_D) /* {{{ */
 #ifdef __CYGWIN__
 		setitimer(ITIMER_REAL, &no_timeout, NULL);
 #else
+                // linux api 设定 no_timeout 时间后 触发itimer_prof 信号
+                // ITIMER_REAL:计时器的值实时递减，发送的信号是SIGALRM
+                // ITIMER_VIRTUAL:进程执行时递减计时器的值，发送的信号是SIGVTALRM
+                // ITIMER_PROF:进程和系统执行时都递减计时器的值，发送的信号是SIGPROF
+                // ITIMER_REAL,都是用户空间信息
 		setitimer(ITIMER_PROF, &no_timeout, NULL);
 #endif
 	}
