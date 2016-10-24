@@ -139,6 +139,7 @@ ZEND_API void gc_zval_possible_root(zval *zv TSRMLS_DC)
 		return;
 	}
 
+        // 对对象的特殊处理
 	if (zv->type == IS_OBJECT) {
 		GC_ZOBJ_CHECK_POSSIBLE_ROOT(zv);
 		return;
@@ -146,8 +147,11 @@ ZEND_API void gc_zval_possible_root(zval *zv TSRMLS_DC)
 
 	GC_BENCH_INC(zval_possible_root);
 
+        // 刚放进垃圾缓冲池中的变量颜色是紫色
 	if (GC_ZVAL_GET_COLOR(zv) != GC_PURPLE) {
+                // 变量尚未放置到垃圾缓冲池中
 		if (!GC_ZVAL_ADDRESS(zv)) {
+                        // 分配一个gc_root_buffer用来记录该变量的信息
 			gc_root_buffer *newRoot = GC_G(unused);
 
 			if (newRoot) {
@@ -169,14 +173,19 @@ ZEND_API void gc_zval_possible_root(zval *zv TSRMLS_DC)
 				GC_G(unused) = newRoot->prev;
 			}
 
+                        // 在这里设置为紫色
 			GC_ZVAL_SET_PURPLE(zv);
+                        
+                        // 链接入垃圾缓冲池中
 			newRoot->next = GC_G(roots).next;
 			newRoot->prev = &GC_G(roots);
 			GC_G(roots).next->prev = newRoot;
 			GC_G(roots).next = newRoot;
 
+                        // 注意这里存放的是缓冲池中的地址
 			GC_ZVAL_SET_ADDRESS(zv, newRoot);
 
+                        // 对于变量而言,hendle必须是0, u.pz 指向具体的变量
 			newRoot->handle = 0;
 			newRoot->u.pz = zv;
 
@@ -306,10 +315,12 @@ tail_call:
 		}
 	} else if (Z_TYPE_P(pz) == IS_ARRAY) {
 		if (Z_ARRVAL_P(pz) != &EG(symbol_table)) {
+                        // hash的第一个元素
 			p = Z_ARRVAL_P(pz)->pListHead;
 		}
 	}
 	while (p != NULL) {
+                // hash的具体数值
 		pz = *(zval**)p->pData;
 		if (Z_TYPE_P(pz) != IS_ARRAY || Z_ARRVAL_P(pz) != &EG(symbol_table)) {
 			pz->refcount__gc++;
@@ -365,6 +376,11 @@ static void zobj_scan_black(struct _store_object *obj, zval *pz TSRMLS_DC)
 	}
 }
 
+/**
+ * @desc 将变量标记为灰色,也就是逐个将ref_count 减一
+ * @param pz : zval : 变量
+ * @return
+ */
 static void zval_mark_grey(zval *pz TSRMLS_DC)
 {
 	Bucket *p;
@@ -475,10 +491,11 @@ static void gc_mark_roots(TSRMLS_D)
 	gc_root_buffer *current = GC_G(roots).next;
 
 	while (current != &GC_G(roots)) {
+                // 对于对象,handle非空,而对于普通变量,hendle为0
 		if (current->handle) {
 			if (EG(objects_store).object_buckets) {
 				struct _store_object *obj = &EG(objects_store).object_buckets[current->handle].bucket.obj;
-
+                                // 紫色
 				if (GC_GET_COLOR(obj->buffered) == GC_PURPLE) {
 					zval z;
 
@@ -513,11 +530,13 @@ tail_call:
 		if (pz->refcount__gc > 0) {
 			zval_scan_black(pz TSRMLS_CC);
 		} else {
+                        // 发现垃圾
 			GC_ZVAL_SET_COLOR(pz, GC_WHITE);
 			if (Z_TYPE_P(pz) == IS_OBJECT && EG(objects_store).object_buckets) {
 				zend_object_get_gc_t get_gc;
 				struct _store_object *obj = &EG(objects_store).object_buckets[Z_OBJ_HANDLE_P(pz)].bucket.obj;
 
+                                // 对于减一后的变量,会置为灰色,以防止多次操作同一个变量
 				if (GC_GET_COLOR(obj->buffered) == GC_GREY) {
 					if (obj->refcount > 0) {
 						zobj_scan_black(obj, pz TSRMLS_CC);

@@ -42,42 +42,68 @@
 
 #define GC_COLOR  0x03
 
-#define GC_BLACK  0x00
-#define GC_WHITE  0x01
-#define GC_GREY   0x02
-#define GC_PURPLE 0x03
+#define GC_BLACK  0x00         // 正常的颜色
+#define GC_WHITE  0x01         // 垃圾的颜色
+#define GC_GREY   0x02         // 减一后的颜色
+#define GC_PURPLE 0x03         // 放入缓存池中的颜色
 
+/* 取变量地址,地址的低两位用来标识变量颜色 */
 #define GC_ADDRESS(v) \
 	((gc_root_buffer*)(((zend_uintptr_t)(v)) & ~GC_COLOR))
+
+/* 设置变量地址 */
 #define GC_SET_ADDRESS(v, a) \
 	(v) = ((gc_root_buffer*)((((zend_uintptr_t)(v)) & GC_COLOR) | ((zend_uintptr_t)(a))))
+
+/* 获取变量颜色,也就是取变量地址的低两位 */
 #define GC_GET_COLOR(v) \
 	(((zend_uintptr_t)(v)) & GC_COLOR)
+
+/* 设置变量颜色 */
 #define GC_SET_COLOR(v, c) \
 	(v) = ((gc_root_buffer*)((((zend_uintptr_t)(v)) & ~GC_COLOR) | (c)))
+
+/* 设置为黑色,也就是正常变量的颜色 */
 #define GC_SET_BLACK(v) \
 	(v) = ((gc_root_buffer*)(((zend_uintptr_t)(v)) & ~GC_COLOR))
+
+/* 设置为紫色,也就是刚放入垃圾池中的颜色 */
 #define GC_SET_PURPLE(v) \
 	(v) = ((gc_root_buffer*)(((zend_uintptr_t)(v)) | GC_PURPLE))
 
+/* 初始化变量时,垃圾缓存池中为空 */
 #define GC_ZVAL_INIT(z) \
 	((zval_gc_info*)(z))->u.buffered = NULL
+
+/* 变量在垃圾缓冲池中的地址 */
 #define GC_ZVAL_ADDRESS(v) \
 	GC_ADDRESS(((zval_gc_info*)(v))->u.buffered)
+
+/* 设置变量在垃圾缓冲池中的地址 */
 #define GC_ZVAL_SET_ADDRESS(v, a) \
 	GC_SET_ADDRESS(((zval_gc_info*)(v))->u.buffered, (a))
+
+/* 变量的颜色 */
 #define GC_ZVAL_GET_COLOR(v) \
 	GC_GET_COLOR(((zval_gc_info*)(v))->u.buffered)
+
+/* 设置变量的颜色 */
 #define GC_ZVAL_SET_COLOR(v, c) \
 	GC_SET_COLOR(((zval_gc_info*)(v))->u.buffered, (c))
+
+/* 设置变量为黑色 */
 #define GC_ZVAL_SET_BLACK(v) \
 	GC_SET_BLACK(((zval_gc_info*)(v))->u.buffered)
+
+/* 设置变量为紫色 */
 #define GC_ZVAL_SET_PURPLE(v) \
 	GC_SET_PURPLE(((zval_gc_info*)(v))->u.buffered)
 
+/* 初始化对象 */
 #define GC_OBJ_INIT(z) \
 	(z)->buffered = NULL
 
+/* 缓冲池链表 */
 typedef struct _gc_root_buffer {
 	struct _gc_root_buffer   *prev;		/* double-linked list               */
 	struct _gc_root_buffer   *next;
@@ -88,6 +114,7 @@ typedef struct _gc_root_buffer {
 	} u;
 } gc_root_buffer;
 
+/* 新的变量数据结构,加上了垃圾回收机制 */
 typedef struct _zval_gc_info {
 	zval z;
 	union {

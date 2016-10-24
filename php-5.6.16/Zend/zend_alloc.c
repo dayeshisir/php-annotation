@@ -405,7 +405,7 @@ typedef struct _zend_mm_free_block {
 	struct _zend_mm_free_block *child[2];           // 两个子结点
 } zend_mm_free_block;
 
-#define ZEND_MM_NUM_BUCKETS (sizeof(size_t) << 3)   // 64
+#define ZEND_MM_NUM_BUCKETS (sizeof(size_t) << 3)   // 8^3 = 512
 
 #define ZEND_MM_CACHE 1
 #define ZEND_MM_CACHE_SIZE (ZEND_MM_NUM_BUCKETS * 4 * 1024)
