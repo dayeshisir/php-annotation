@@ -1532,6 +1532,15 @@ int zend_do_verify_access_types(const znode *current_access_type, const znode *n
 }
 /* }}} */
 
+/**
+ * @desc 编译时遇到function关键字时处理
+ * @param function_token 
+ * @param name
+ * @param is_method
+ * @param return_reference
+ * @param fn_flag_node
+ * @return
+ */
 void zend_do_begin_function_declaration(znode *function_token, znode *function_name, int is_method, int return_reference, znode *fn_flags_znode TSRMLS_DC) /* {{{ */
 {
 	zend_op_array op_array;
@@ -1558,8 +1567,10 @@ void zend_do_begin_function_declaration(znode *function_token, znode *function_n
 		zend_error(E_STRICT, "Static function %s%s%s() should not be abstract", is_method ? CG(active_class_entry)->name : "", is_method ? "::" : "", Z_STRVAL(function_name->u.constant));
 	}
 
+        // 保存了当前的active_op_array,用于编译完成之后恢复
 	function_token->u.op_array = CG(active_op_array);
 
+        // 对op_array进行初始化，强制op_array.fn_flags会被初始化为0,不知道为啥
 	orig_interactive = CG(interactive);
 	CG(interactive) = 0;
 	init_op_array(&op_array, ZEND_USER_FUNCTION, INITIAL_OP_ARRAY_SIZE TSRMLS_CC);
@@ -1707,7 +1718,7 @@ void zend_do_begin_function_declaration(znode *function_token, znode *function_n
 
 		str_efree(lcname);
 	} else {
-		zend_op *opline = get_next_op(CG(active_op_array) TSRMLS_CC);
+		zend_op *opline = get_next_op(CG(active_op_array) TSRMLS_CC); 
 		zval key;
 		zval **ns_name;
 
@@ -1717,7 +1728,7 @@ void zend_do_begin_function_declaration(znode *function_token, znode *function_n
 
 			tmp.u.constant = *CG(current_namespace);
 			zval_copy_ctor(&tmp.u.constant);
-			zend_do_build_namespace_name(&tmp, &tmp, function_name TSRMLS_CC);
+			zend_do_build_namespace_name(&tmp, &tmp, function_name TSRMLS_CC);    /* 结合name_space,整出一个类似 name_space/function_name 形式的函数名,姑且称为函数全名 */
 			op_array.function_name = Z_STRVAL(tmp.u.constant);
 			name_len = Z_STRLEN(tmp.u.constant);
 			lcname = zend_str_tolower_dup(Z_STRVAL(tmp.u.constant), name_len);
@@ -1738,21 +1749,27 @@ void zend_do_begin_function_declaration(znode *function_token, znode *function_n
 			efree(tmp);
 		}
 
+                /* 往active_op_array中赋值当前函数的配置,其中op1是内部函数名称,op2是函数全名 */
 		opline->opcode = ZEND_DECLARE_FUNCTION;
 		opline->op1_type = IS_CONST;
-		build_runtime_defined_function_key(&key, lcname, name_len TSRMLS_CC);
-		opline->op1.constant = zend_add_literal(CG(active_op_array), &key TSRMLS_CC);
+		build_runtime_defined_function_key(&key, lcname, name_len TSRMLS_CC);    /*产生一个类似 00foo/home/work/foo.php00ABEBBF形式的函数名称,姑且称之为内部函数名称 */
+		opline->op1.constant = zend_add_literal(CG(active_op_array), &key TSRMLS_CC);  /* 将上一步得到的内部函数名称添加到zend_op_array结构体的literal数组中,返回的是数组的下标,设计思路类似IS_CV变量 */
 		Z_HASH_P(&CONSTANT(opline->op1.constant)) = zend_hash_func(Z_STRVAL(CONSTANT(opline->op1.constant)), Z_STRLEN(CONSTANT(opline->op1.constant)));
 		opline->op2_type = IS_CONST;
-		LITERAL_STRINGL(opline->op2, lcname, name_len, 1);
+		LITERAL_STRINGL(opline->op2, lcname, name_len, 1);  /* 将之前得到的函数全名添加到zend_op_array结构体的literal数组中,返回的是数组的下标,设计思路类似IS_CV变量 */
 		CALCULATE_LITERAL_HASH(opline->op2.constant);
 		opline->extended_value = ZEND_DECLARE_FUNCTION;
+                
+                /* 更新到全局函数表中,其中key是内部函数名称,hash值是op1的hash值,而存储的数据是 op_array */
 		zend_hash_quick_update(CG(function_table), Z_STRVAL(key), Z_STRLEN(key), Z_HASH_P(&CONSTANT(opline->op1.constant)), &op_array, sizeof(zend_op_array), (void **) &CG(active_op_array));
-		zend_stack_push(&CG(context_stack), (void *) &CG(context), sizeof(CG(context)));
+		
+                /* 这里应该是切换 active_op_array的地方了 [猜的]*/
+                zend_stack_push(&CG(context_stack), (void *) &CG(context), sizeof(CG(context)));
 		zend_init_compiler_context(TSRMLS_C);
 		str_efree(lcname);
 	}
-
+        
+        // 需要debuginfo，则函数体内的第一条zend_op，为ZEND_EXT_NOP
 	if (CG(compiler_options) & ZEND_COMPILE_EXTENDED_INFO) {
 		zend_op *opline = get_next_op(CG(active_op_array) TSRMLS_CC);
 
@@ -1762,6 +1779,7 @@ void zend_do_begin_function_declaration(znode *function_token, znode *function_n
 		SET_UNUSED(opline->op2);
 	}
 
+        // 控制switch和foreach内声明的函数
 	{
 		/* Push a separator to the switch stack */
 		zend_switch_entry switch_entry;
@@ -1837,9 +1855,12 @@ void zend_do_end_function_declaration(const znode *function_token TSRMLS_DC) /* 
 	zend_do_return(NULL, 0 TSRMLS_CC);
 
 	pass_two(CG(active_op_array) TSRMLS_CC);
+        
+        /* 释放当前函数的CG(labels)，并从CG(labels_stack)中还原之前的CG(labels) */
 	zend_release_labels(0 TSRMLS_CC);
 
 	if (CG(active_class_entry)) {
+                /* 检查魔术方法的参数是否合法 */
 		zend_check_magic_method_implementation(CG(active_class_entry), (zend_function*)CG(active_op_array), E_COMPILE_ERROR TSRMLS_CC);
 	} else {
 		/* we don't care if the function name is longer, in fact lowercasing only
@@ -1847,12 +1868,16 @@ void zend_do_end_function_declaration(const znode *function_token TSRMLS_DC) /* 
 		name_len = strlen(CG(active_op_array)->function_name);
 		zend_str_tolower_copy(lcname, CG(active_op_array)->function_name, MIN(name_len, sizeof(lcname)-1));
 		lcname[sizeof(lcname)-1] = '\0'; /* zend_str_tolower_copy won't necessarily set the zero byte */
+                
+                /* 检查__autoload函数的参数是否合法 */
 		if (name_len == sizeof(ZEND_AUTOLOAD_FUNC_NAME) - 1 && !memcmp(lcname, ZEND_AUTOLOAD_FUNC_NAME, sizeof(ZEND_AUTOLOAD_FUNC_NAME)) && CG(active_op_array)->num_args != 1) {
 			zend_error_noreturn(E_COMPILE_ERROR, "%s() must take exactly 1 argument", ZEND_AUTOLOAD_FUNC_NAME);
 		}
 	}
 
 	CG(active_op_array)->line_end = zend_get_compiled_lineno(TSRMLS_C);
+        
+        /* 将CG(active_op_array)还原成函数外层的op_array */
 	CG(active_op_array) = function_token->u.op_array;
 
 
@@ -1862,6 +1887,16 @@ void zend_do_end_function_declaration(const znode *function_token TSRMLS_DC) /* 
 }
 /* }}} */
 
+/**
+ * @desc 接受参数,当前看到函数的入参处理会调用这个,其他情形的调用,尚待发觉
+ *       变量都是存储在active_op_array->vars以加速执行
+ * @param op
+ * @param varname
+ * @param initialization
+ * @param class_type
+ * @param pass_by_reference
+ * @param is_variadic
+ */
 void zend_do_receive_param(zend_uchar op, znode *varname, const znode *initialization, znode *class_type, zend_uchar pass_by_reference, zend_bool is_variadic TSRMLS_DC) /* {{{ */
 {
 	zend_op *opline;
@@ -1872,6 +1907,8 @@ void zend_do_receive_param(zend_uchar op, znode *varname, const znode *initializ
 		zend_error_noreturn(E_COMPILE_ERROR, "Cannot re-assign auto-global variable %s", Z_STRVAL(varname->u.constant));
 	} else {
 		var.op_type = IS_CV;
+                
+                /* 在 active_op_array->vars 中查找varname,找到直接返回下标,否则,添加到 active_op_array->vars 中,返回下标 */
 		var.u.op.var = lookup_cv(CG(active_op_array), Z_STRVAL(varname->u.constant), Z_STRLEN(varname->u.constant), 0 TSRMLS_CC);
 		Z_STRVAL(varname->u.constant) = (char*)CG(active_op_array)->vars[var.u.op.var].name;
 		var.EA = 0;
@@ -2087,6 +2124,7 @@ void zend_do_begin_dynamic_function_call(znode *function_name, int ns_call TSRML
 	zend_op *opline;
 
 	opline = get_next_op(CG(active_op_array) TSRMLS_CC);
+        // 参数ns_call表名是否以shortname在命名空间中调用函数
 	if (ns_call) {
 		/* In run-time PHP will check for function with full name and
 		   internal function with short name */
@@ -2625,6 +2663,7 @@ void zend_do_pass_param(znode *param, zend_uchar op TSRMLS_DC) /* {{{ */
 	int send_by_reference = 0;
 	int send_function = 0;
 
+        // 从CG(function_call_stack)获取当前函数，注意可能拿出的是NULL
 	zend_stack_top(&CG(function_call_stack), (void **) &fcall);
 	function_ptr = fcall->fbc;
 	fcall->arg_num++;
@@ -2649,6 +2688,7 @@ void zend_do_pass_param(znode *param, zend_uchar op TSRMLS_DC) /* {{{ */
 		return;
 	}
 
+        // 函数已定义，则根据函数的定义，来决定send_by_reference是否传引用
 	if (function_ptr) {
 		if (ARG_MAY_BE_SENT_BY_REF(function_ptr, fcall->arg_num)) {
 			if (op == ZEND_SEND_VAR && param->op_type & (IS_VAR|IS_CV)) {
@@ -7369,7 +7409,7 @@ void zend_do_declare_constant(znode *name, znode *value TSRMLS_DC) /* {{{ */
 		efree(tmp);
 	}
 
-	opline = get_next_op(CG(active_op_array) TSRMLS_CC);
+	opline = get_next_op(CG(active_op_array) TSRMLS_CC)
 	opline->opcode = ZEND_DECLARE_CONST;
 	SET_UNUSED(opline->result);
 	SET_NODE(opline->op1, name);

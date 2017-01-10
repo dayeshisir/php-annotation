@@ -877,8 +877,8 @@ static inline void zend_mm_remove_from_free_list(zend_mm_heap *heap, zend_mm_fre
 			zend_mm_panic("zend_mm_heap corrupted");
 		}
 #endif
-		// 1存在的话就是1，否则就是0
-		rp = &mm_block->child[mm_block->child[1] != NULL];
+		// 1存在的话就是1，否则就是0,也就是这个树枝中的最大值 
+		rp = &mm_block->child[mm_block->child[1] != NULL];    // 二级指针 
 		prev = *rp;
 		if (EXPECTED(prev == NULL)) {
 			// 就一个节点
@@ -890,6 +890,7 @@ static inline void zend_mm_remove_from_free_list(zend_mm_heap *heap, zend_mm_fre
 				heap->large_free_bitmap &= ~(ZEND_MM_LONG_CONST(1) << index);
 		    }
 		} else {
+                        // 继续找这个树枝的最大节点,rp指向这个最大节点,cp指向null导致退出循环
 			while (*(cp = &(prev->child[prev->child[1] != NULL])) != NULL) {
 				prev = *cp;
 				rp = cp;
@@ -897,6 +898,7 @@ static inline void zend_mm_remove_from_free_list(zend_mm_heap *heap, zend_mm_fre
 			*rp = NULL;
 
 subst_block:
+                        // 用prev代替mm_block,此时的prev是mm_block分支下的最大节点
 			ZEND_MM_CHECK_TREE(mm_block);
 			*mm_block->parent = prev;
 			prev->parent = mm_block->parent;
@@ -1228,10 +1230,14 @@ ZEND_API zend_mm_heap *zend_mm_startup_ex(const zend_mm_mem_handlers *handlers, 
 	if (internal) {
 		int i;
 		zend_mm_free_block *p, *q, *orig;
+                
+                /* 从自身割下一块内存 */
 		zend_mm_heap *mm_heap = _zend_mm_alloc_int(heap, sizeof(zend_mm_heap)  ZEND_FILE_LINE_CC ZEND_FILE_LINE_EMPTY_CC);
 
+                /* 存放heap数据 */
 		*mm_heap = *heap;
 
+                // 将环解开,什么场景才会如此呢
 		p = ZEND_MM_SMALL_FREE_BUCKET(mm_heap, 0);
 		orig = ZEND_MM_SMALL_FREE_BUCKET(heap, 0);
 		for (i = 0; i < ZEND_MM_NUM_BUCKETS; i++) {
@@ -1945,7 +1951,7 @@ static zend_mm_free_block *zend_mm_search_large_block(zend_mm_heap *heap, size_t
 				best_fit = p;
 			}
 
-			// 往深层遍历
+			// 往深层遍历 找最小的,放在p中,用于比较best_fit,保留次小的,放在rst中,用于夹逼
 			if ((m & (ZEND_MM_LONG_CONST(1) << (ZEND_MM_NUM_BUCKETS-1))) == 0) {
 				// 来到这里，就是有0号节点的情形
 				if (p->child[1]) {
