@@ -2019,8 +2019,10 @@ int zend_do_begin_function_call(znode *function_name, zend_bool check_namespace 
 	char *lcname;
 	char *is_compound = memchr(Z_STRVAL(function_name->u.constant), '\\', Z_STRLEN(function_name->u.constant));
 
+        // 将函数名进行修正，例如带上命名空间作为前缀等
 	zend_resolve_function_name(function_name, &check_namespace TSRMLS_CC);
 
+        // 能进入该分支，说明在一个命名空间下以shortname调用函数，会生成一条DO_FCALL_BY_NAME指令
 	if (check_namespace && CG(current_namespace) && !is_compound) {
 			/* We assume we call function from the current namespace
 			if it is not prefixed. */
@@ -2031,6 +2033,7 @@ int zend_do_begin_function_call(znode *function_name, zend_bool check_namespace 
 			return 1;
 	}
 
+        // 转成小写，因为CG(function_table)中的函数名都是小写
 	lcname = zend_str_tolower_dup(Z_STRVAL(function_name->u.constant), Z_STRLEN(function_name->u.constant));
 	if ((zend_hash_find(CG(function_table), lcname, Z_STRLEN(function_name->u.constant)+1, (void **) &function)==FAILURE) ||
 	 	((CG(compiler_options) & ZEND_COMPILE_IGNORE_INTERNAL_FUNCTIONS) &&
@@ -2042,6 +2045,7 @@ int zend_do_begin_function_call(znode *function_name, zend_bool check_namespace 
 	efree(Z_STRVAL(function_name->u.constant));
 	Z_STRVAL(function_name->u.constant) = lcname;
 
+        // 压入CG(function_call_stack)
 	zend_push_function_call_entry(function TSRMLS_CC);
 	if (CG(context).nested_calls + 1 > CG(active_op_array)->nested_calls) {
 		CG(active_op_array)->nested_calls = CG(context).nested_calls + 1;
@@ -2124,7 +2128,7 @@ void zend_do_begin_dynamic_function_call(znode *function_name, int ns_call TSRML
 	zend_op *opline;
 
 	opline = get_next_op(CG(active_op_array) TSRMLS_CC);
-        // 参数ns_call表名是否以shortname在命名空间中调用函数
+        // 参数ns_call表明是否以shortname在命名空间中调用函数
 	if (ns_call) {
 		/* In run-time PHP will check for function with full name and
 		   internal function with short name */
@@ -2611,6 +2615,7 @@ void zend_do_end_function_call(znode *function_name, znode *result, int is_metho
 	zend_function_call_entry *fcall;
 	zend_stack_top(&CG(function_call_stack), (void **) &fcall);
 
+        // 据说这段逻辑分支现在已经走不到了
 	if (is_method && function_name && function_name->op_type == IS_UNUSED) {
 		/* clone */
 		if (fcall->arg_num != 0) {
@@ -2619,6 +2624,8 @@ void zend_do_end_function_call(znode *function_name, znode *result, int is_metho
 		opline = &CG(active_op_array)->opcodes[Z_LVAL(function_name->u.constant)];
 	} else {
 		opline = get_next_op(CG(active_op_array) TSRMLS_CC);
+                
+                //根据函数是否定义, 生成ZEND_DO_FCALL指令
 		if (fcall->fbc) {
 			opline->opcode = ZEND_DO_FCALL;
 			SET_NODE(opline->op1, function_name);
@@ -2641,10 +2648,11 @@ void zend_do_end_function_call(znode *function_name, znode *result, int is_metho
 		}
 	}
 
+        // 生成临时变量索引，函数的调用，返回的znode必然是IS_VAR
 	opline->result.var = get_temporary_variable(CG(active_op_array));
 	opline->result_type = IS_VAR;
 	GET_NODE(result, opline->result);
-	opline->extended_value = fcall->arg_num;
+	opline->extended_value = fcall->arg_num;    // 传参个数
 
 	if (CG(context).used_stack + 1 > CG(active_op_array)->used_stack) {
 		CG(active_op_array)->used_stack = CG(context).used_stack + 1;
@@ -2654,6 +2662,15 @@ void zend_do_end_function_call(znode *function_name, znode *result, int is_metho
 }
 /* }}} */
 
+/**
+ * @desc 编译函数调用时,解析参数传递
+ * @param param
+ * @param op : zend_uchar : 可能取值:
+ *     ZEND_SEND_VAL
+ *     ZEND_SEND_VAR
+ *     ZEND_SEND_REF
+ *     ZEND_SEND_VAR_NO_REF
+ */
 void zend_do_pass_param(znode *param, zend_uchar op TSRMLS_DC) /* {{{ */
 {
 	zend_op *opline;
@@ -2673,6 +2690,7 @@ void zend_do_pass_param(znode *param, zend_uchar op TSRMLS_DC) /* {{{ */
 			"Cannot use positional argument after argument unpacking");
 	}
 
+        // 调用的地方以引用传参，但是php.ini中配置不允许这样，则抛错
 	if (original_op == ZEND_SEND_REF) {
 		if (function_ptr &&
 		    function_ptr->common.function_name &&
@@ -2706,14 +2724,17 @@ void zend_do_pass_param(znode *param, zend_uchar op TSRMLS_DC) /* {{{ */
 		}
 	}
 
+        // 如果用户传递的参数，本身就是一次函数调用，则将op改成ZEND_SEND_VAR_NO_REF
 	if (op == ZEND_SEND_VAR && zend_is_function_or_method_call(param)) {
 		/* Method call */
 		op = ZEND_SEND_VAR_NO_REF;
 		send_function = ZEND_ARG_SEND_FUNCTION;
 	} else if (op == ZEND_SEND_VAL && (param->op_type & (IS_VAR|IS_CV))) {
+                // 如果用户传递的参数，是一个表达式，并且结果会产生中间变量，则也将op改成ZEND_SEND_VAR_NO_REF
 		op = ZEND_SEND_VAR_NO_REF;
 	}
 
+        // 如果根据函数定义需要传递引用，且实际传递的参数是变量，则将op改成ZEND_SEND_REF
 	if (op!=ZEND_SEND_VAR_NO_REF && send_by_reference==ZEND_ARG_SEND_BY_REF) {
 		/* change to passing by reference */
 		switch (param->op_type) {
@@ -2727,6 +2748,7 @@ void zend_do_pass_param(znode *param, zend_uchar op TSRMLS_DC) /* {{{ */
 		}
 	}
 
+        // 如果实际传递的参数是变量，调用zend_do_end_variable_parse处理链式调用
 	if (original_op == ZEND_SEND_VAR) {
 		switch (op) {
 			case ZEND_SEND_VAR_NO_REF:
@@ -2745,8 +2767,10 @@ void zend_do_pass_param(znode *param, zend_uchar op TSRMLS_DC) /* {{{ */
 		}
 	}
 
+        // 获取下一条zend op指令
 	opline = get_next_op(CG(active_op_array) TSRMLS_CC);
 
+        // extended_value加上不同的附加信息
 	if (op == ZEND_SEND_VAR_NO_REF) {
 		if (function_ptr) {
 			opline->extended_value = ZEND_ARG_COMPILE_TIME_BOUND | send_by_reference | send_function;
